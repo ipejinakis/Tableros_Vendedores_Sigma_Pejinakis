@@ -1,0 +1,31 @@
+# Secretos
+.env
+*.env
+!.env.example
+
+# Datos (contienen información de clientes)
+data/
+muestra/
+*.parquet
+*.csv
+*.json
+!package.json
+*.xlsx
+*.xls
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# SO / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Streamlit
+.streamlit/secrets.toml
