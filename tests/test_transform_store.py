@@ -267,3 +267,16 @@ def test_muestra_real_dimensiones(sample_dir):
     assert ar["articulo_id"].is_unique and ar["costo_ultima_compra"].notna().any()
     ve = T.build_dim_vendedor(json.load(open(sample_dir / "vendedores.json")))
     assert ve["vendedor_id"].is_unique and ve["activo"].sum() == 26
+
+
+def test_dim_cliente_conserva_los_atributos_personalizados():
+    rows = [{"id": 1, "nombre": "A", "rubroCodigo": "65", "rubroDescripcion": "VINOTECA",
+             "attributes": {"vinotecas": "11 titulares vinotec", "segmento_clientes": "b", "Heladeras Coca": None}},
+            {"id": 2, "nombre": "B", "rubroCodigo": "02", "rubroDescripcion": "KIOSCO COMUN",
+             "attributes": {"vinotecas": None, "segmento_clientes": ""}},
+            {"id": 3, "nombre": "C", "rubroCodigo": "03", "rubroDescripcion": "ALMACENES"}]          # sin attributes
+    df = T.build_dim_cliente(rows).set_index("cliente_id")
+    assert df.loc["1", "attr_vinotecas"] == "11 titulares vinotec" and df.loc["1", "attr_segmento_clientes"] == "b"
+    assert pd.isna(df.loc["1", "attr_heladeras_coca"])                   # el nombre se normaliza
+    assert pd.isna(df.loc["2", "attr_vinotecas"]) and pd.isna(df.loc["2", "attr_segmento_clientes"])   # None y "" = sin dato
+    assert pd.isna(df.loc["3", "attr_vinotecas"])                        # cliente sin bloque de atributos

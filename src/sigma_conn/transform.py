@@ -17,6 +17,8 @@ import json
 import logging
 from datetime import date
 
+import re
+
 import pandas as pd
 
 log = logging.getLogger(__name__)
@@ -372,6 +374,15 @@ def build_dim_cliente(rows: list[dict]) -> pd.DataFrame:
     for c in ("latitud", "longitud", "limite_credito"):
         out[c] = _num(out[c])
     out["fecha_alta"] = pd.to_datetime(out["fecha_alta"], errors="coerce")
+    # Atributos personalizados del cliente en SIGMA (`attributes`): una columna `attr_<nombre>` por atributo (p. ej.
+    # `attr_vinotecas` = "11 titulares vinotec", `attr_segmento_clientes` = a/b/c). Vacío = el cliente no lo tiene.
+    if "attributes" in df.columns:
+        attrs = df["attributes"].map(lambda a: a if isinstance(a, dict) else {})
+        for k in sorted({str(k) for a in attrs for k in a}):
+            col = "attr_" + re.sub(r"\W+", "_", k.strip().lower()).strip("_")
+            if col in out.columns:
+                continue
+            out[col] = _str(attrs.map(lambda a, k=k: a.get(k))).replace("", pd.NA)
     return out.drop_duplicates("cliente_id", keep="last").reset_index(drop=True)
 
 

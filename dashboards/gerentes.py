@@ -94,6 +94,19 @@ def cargar_club_faro(data_dir: str, fmt: str):
     return out[0], out[1], out[2], faltan
 
 
+@st.cache_data(ttl=300, show_spinner="Leyendo 11 Titulares…")
+def cargar_titulares(data_dir: str, fmt: str):
+    store = Store(Path(data_dir), fmt)
+    faltan, out = [], []
+    for nombre in ("cfg_11_titulares_articulo", "dim_cliente"):
+        try:
+            out.append(store.read_table(nombre))
+        except FileNotFoundError:
+            out.append(None)
+            faltan.append(nombre)
+    return out[0], out[1], faltan
+
+
 store = TB.abrir_store()
 meses = TB.meses_disponibles(store)
 if not meses:
@@ -103,7 +116,7 @@ if not meses:
 # ----------------------------------------------------------------------------- filtros
 sb = st.sidebar
 sb.header("Filtros")
-mes = sb.selectbox("Mes", list(reversed(meses)))
+mes = sb.selectbox("Mes (Facturación, Ritmo y Por canal)", list(reversed(meses)))
 try:
     ventas, dim_art, dim_vend, meta = cargar(str(store.root), store.fmt, mes)
 except FileNotFoundError as exc:
@@ -114,7 +127,22 @@ anio, m = (int(x) for x in mes.split("-"))
 inicio = date(anio, m, 1)
 fin = (pd.Timestamp(inicio) + pd.offsets.MonthEnd(0)).date()
 ultimo = TB.ultimo_dia_con_ventas(ventas)
-corte = sb.date_input("Corte (día inclusive)", value=min(ultimo or inicio, fin), min_value=inicio, max_value=fin)
+corte = sb.date_input("Corte del mes (día inclusive)", value=min(ultimo or inicio, fin), min_value=inicio, max_value=fin)
+
+# Los objetivos de Cobertura, Mis Ventas, Club Faro y 11 Titulares son BIMESTRALES: tienen su propio período y su propio corte.
+MESES_ES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
+bimestres = sorted({TB.bimestre_de(x)[0] for x in meses}, reverse=True)
+sb.divider()
+bim_sel = sb.selectbox("Bimestre (Cobertura, Mis Ventas, Club Faro y 11 Titulares)", bimestres,
+                       format_func=lambda d: f"{MESES_ES[d.month - 1]}–{MESES_ES[d.month]} {d.year}")
+ini_bim, fin_bim = TB.bimestre_de(f"{bim_sel:%Y-%m}")
+try:
+    _vb, _ = cargar_cobertura(str(store.root), store.fmt, ini_bim, fin_bim)
+    ultimo_b = TB.ultimo_dia_con_ventas(_vb)
+except FileNotFoundError:
+    ultimo_b = None
+corte_b = sb.date_input("Corte del bimestre (día inclusive)", value=min(ultimo_b or ini_bim, fin_bim), min_value=ini_bim, max_value=fin_bim)
+sb.divider()
 
 tabla_total, resumen = TB.facturacion_vendedores(ventas, dim_art, dim_vend, corte)
 supervisores = sorted(s for s in tabla_total["supervisor"].unique() if s)
@@ -162,8 +190,8 @@ s1.metric(TB.ESTADO_TXT["verde"], int(ne.get("verde", 0)), help="Ya alcanzaron a
 s2.metric(TB.ESTADO_TXT["amarillo"], int(ne.get("amarillo", 0)), help="Todavía no lo alcanzaron, pero al ritmo actual llegan al escalón 1.")
 s3.metric(TB.ESTADO_TXT["rojo"], int(ne.get("rojo", 0)), help="Al ritmo actual no llegan al escalón 1.")
 
-tab_fact, tab_ritmo, tab_cob, tab_mv, tab_cf, tab_canal, tab_escalas = st.tabs(
-    ["Facturación", "Ritmo", "Cobertura", "Mis Ventas", "Club Faro", "Por canal", "Escalas y premios"])
+tab_fact, tab_ritmo, tab_cob, tab_mv, tab_cf, tab_11t, tab_canal, tab_escalas = st.tabs(
+    ["Facturación", "Ritmo", "Cobertura", "Mis Ventas", "Club Faro", "11 Titulares", "Por canal", "Escalas y premios"])
 
 # ----------------------------------------------------------------------------- pestaña facturación
 with tab_fact:
@@ -266,7 +294,7 @@ with tab_ritmo:
 
 # ----------------------------------------------------------------------------- pestaña cobertura
 with tab_cob:
-    ini_b, fin_b = TB.bimestre_de(mes)
+    ini_b, fin_b = ini_bim, fin_bim
     try:
         ventas_b, obj_cob = cargar_cobertura(str(store.root), store.fmt, ini_b, fin_b)
     except FileNotFoundError as exc:
@@ -275,10 +303,10 @@ with tab_cob:
     if obj_cob is None and ventas_b is not None:
         st.info("Faltan los objetivos de cobertura. Correr: python scripts/etl/cargar_objetivos.py")
     elif obj_cob is not None:
-        tc_total, rc = TB.cobertura_vendedores(ventas_b, dim_art, dim_vend, obj_cob, ini_b, fin_b, corte)
+        tc_total, rc = TB.cobertura_vendedores(ventas_b, dim_art, dim_vend, obj_cob, ini_b, fin_b, corte_b)
         tc = tc_total[tc_total["vendedor_id"].isin(tabla["vendedor_id"])].copy()
         st.subheader("Cobertura: clientes con compra por categoría")
-        st.caption(f"Bimestre {ini_b:%d/%m/%Y} – {fin_b:%d/%m/%Y} · corte {corte:%d/%m/%Y}. Un cliente cuenta una vez por categoría "
+        st.caption(f"Bimestre {ini_b:%d/%m/%Y} – {fin_b:%d/%m/%Y} · corte {corte_b:%d/%m/%Y}. Un cliente cuenta una vez por categoría "
                    "si compró al menos una vez en el bimestre (los combos suman a su categoría; no cuentan anuladas, notas de "
                    f"crédito ni Depósito Morillo). Avance esperado a hoy: {rc['esperado_pct'] * 100:.0f}% (por días de venta).")
         if rc["periodo"] and rc["periodo"] != f"{ini_b:%Y-%m}/{fin_b:%Y-%m}":
@@ -323,7 +351,7 @@ with tab_cob:
             wide = wide[[c for c in N.CATEGORIAS_COBERTURA if c in wide.columns]].reset_index().rename(columns={"vendedor": "Vendedor"})
             st.dataframe(wide, hide_index=True)
             st.download_button("Descargar cobertura (CSV)", tc.to_csv(index=False).encode("utf-8"),
-                               file_name=f"cobertura_{ini_b:%Y%m}_{corte:%Y%m%d}.csv", mime="text/csv")
+                               file_name=f"cobertura_{ini_b:%Y%m}_{corte_b:%Y%m%d}.csv", mime="text/csv")
         sin_asig = dim_art.loc[dim_art["categoria_cobertura"] == "COMBO_SIN_ASIGNAR", "articulo_id"].astype(str).tolist() \
             if "categoria_cobertura" in dim_art.columns else []
         if sin_asig:
@@ -334,17 +362,17 @@ with tab_cob:
 
 # ----------------------------------------------------------------------------- pestaña Mis Ventas
 with tab_mv:
-    ini_m, fin_m = TB.bimestre_de(mes)
+    ini_m, fin_m = ini_bim, fin_bim
     obj_mv, cfg_camp, faltan_mv = cargar_mis_ventas(str(store.root), store.fmt)
     if faltan_mv:
         st.info("Faltan tablas: " + ", ".join(faltan_mv) + ". Correr scripts/etl/cargar_objetivos.py y scripts/etl/cargar_campanas.py")
     else:
         ventas_m, _ = cargar_cobertura(str(store.root), store.fmt, ini_m, fin_m)
-        mv = TB.mis_ventas_vendedores(ventas_m, dim_art, dim_vend, obj_mv, cfg_camp, ini_m, fin_m, corte)
+        mv = TB.mis_ventas_vendedores(ventas_m, dim_art, dim_vend, obj_mv, cfg_camp, ini_m, fin_m, corte_b)
         mv = mv[mv["vendedor_id"].isin(tabla["vendedor_id"])].copy()
         st.subheader("Mis Ventas: campañas Unilever del bimestre")
-        esp = TB.fraccion_esperada(ini_m, fin_m, corte)
-        st.caption(f"Bimestre {ini_m:%d/%m/%Y} – {fin_m:%d/%m/%Y} · corte {corte:%d/%m/%Y} · avance esperado a hoy: {esp * 100:.0f}% "
+        esp = TB.fraccion_esperada(ini_m, fin_m, corte_b)
+        st.caption(f"Bimestre {ini_m:%d/%m/%Y} – {fin_m:%d/%m/%Y} · corte {corte_b:%d/%m/%Y} · avance esperado a hoy: {esp * 100:.0f}% "
                    "(por días de venta). Cobertura = clientes distintos con compra de la campaña; volumen = unidades netas "
                    "(las notas de crédito restan).")
         por_def = int((cfg_camp["fuente"] == "por defecto (S)").sum())
@@ -392,19 +420,19 @@ with tab_mv:
                                                          "Logrado": st.column_config.NumberColumn(format="%.0f"),
                                                          "Target": st.column_config.NumberColumn(format="%.0f")})
             st.download_button("Descargar Mis Ventas (CSV)", mv.to_csv(index=False).encode("utf-8"),
-                               file_name=f"mis_ventas_{ini_m:%Y%m}_{corte:%Y%m%d}.csv", mime="text/csv")
+                               file_name=f"mis_ventas_{ini_m:%Y%m}_{corte_b:%Y%m%d}.csv", mime="text/csv")
 
 # ----------------------------------------------------------------------------- pestaña Club Faro
 with tab_cf:
-    ini_f, fin_f = TB.bimestre_de(mes)
+    ini_f, fin_f = ini_bim, fin_bim
     obj_cf, cfg_cf, dim_cli, faltan_cf = cargar_club_faro(str(store.root), store.fmt)
     if faltan_cf:
         st.info("Faltan tablas: " + ", ".join(faltan_cf) + ". Correr scripts/etl/cargar_club_faro.py (y el ETL completo para dim_cliente).")
     else:
         ventas_f, _ = cargar_cobertura(str(store.root), store.fmt, ini_f, fin_f)
-        cf, rcf = TB.club_faro_vendedores(ventas_f, dim_art, dim_cli, dim_vend, cfg_cf, obj_cf, ini_f, fin_f, corte)
+        cf, rcf = TB.club_faro_vendedores(ventas_f, dim_art, dim_cli, dim_vend, cfg_cf, obj_cf, ini_f, fin_f, corte_b)
         st.subheader("Club Faro (Peñaflor): clientes con compra por línea")
-        st.caption(f"Bimestre {ini_f:%d/%m/%Y} – {fin_f:%d/%m/%Y} · corte {corte:%d/%m/%Y} · avance esperado a hoy: "
+        st.caption(f"Bimestre {ini_f:%d/%m/%Y} – {fin_f:%d/%m/%Y} · corte {corte_b:%d/%m/%Y} · avance esperado a hoy: "
                    f"{rcf['esperado_pct'] * 100:.0f}% (por días de venta). Con comprar 1 unidad de un artículo de la línea el cliente "
                    "ya suma. Las líneas K+T cuentan clientes tradicionales (kioscos, almacenes, etc.); las AS, autoservicios "
                    "(rubros Autoservicio, AAS Gold y Cadena SAR). En blancos dulces cada SKU distinto por cliente suma 1.")
@@ -462,7 +490,7 @@ with tab_cf:
                                         "Objetivo": st.column_config.NumberColumn(format="%.0f"),
                                         "Faltan": st.column_config.NumberColumn(format="%.0f")})
             st.download_button("Descargar Club Faro (CSV)", cf.to_csv(index=False).encode("utf-8"),
-                               file_name=f"club_faro_{ini_f:%Y%m}_{corte:%Y%m%d}.csv", mime="text/csv")
+                               file_name=f"club_faro_{ini_f:%Y%m}_{corte_b:%Y%m%d}.csv", mime="text/csv")
             st.caption("Semáforo: ✔ en ritmo = va en o por encima del avance esperado (o ya cumplió); ▲ algo atrasado = entre 80 % y "
                        "100 % de lo esperado; ✖ atrasado = por debajo del 80 % de lo esperado.")
             if len(sin_obj):
@@ -477,6 +505,72 @@ with tab_cf:
                 st.dataframe(sin_df, hide_index=True)
                 if (sin_df["DNI"] == "—").all():
                     st.caption("DNI sin dato: la tabla de vendedores de la base todavía no lo trae (el ETL completo lo carga si SIGMA lo informa).")
+
+# ----------------------------------------------------------------------------- pestaña 11 Titulares
+with tab_11t:
+    ini_t, fin_t = ini_bim, fin_bim
+    cfg_t, dim_cli_t, faltan_t = cargar_titulares(str(store.root), store.fmt)
+    if faltan_t:
+        st.info("Faltan tablas: " + ", ".join(faltan_t) + ". Correr scripts/etl/cargar_11_titulares.py (y el ETL completo para dim_cliente).")
+    else:
+        ventas_t, _ = cargar_cobertura(str(store.root), store.fmt, ini_t, fin_t)
+        rt = TB.titulares_resumen(ventas_t, dim_art, dim_cli_t, cfg_t, ini_t, fin_t, corte_b)
+        st.subheader("11 Titulares (Peñaflor): clientes con compra del distribuidor")
+        st.caption(f"Período {ini_t:%d/%m/%Y} – {fin_t:%d/%m/%Y} · corte {corte_b:%d/%m/%Y} · avance esperado a hoy: "
+                   f"{rt['esperado_pct'] * 100:.0f}% (por días de venta). Los objetivos son del distribuidor entero, no por vendedor. "
+                   "Un cliente cuenta en una línea si compró, en un mismo artículo de la línea, 1 caja cerrada o bulto (autoservicios y "
+                   "OP & VTK) o 3 unidades iguales (tradicionales). Canal según el rubro del cliente en SIGMA.")
+        por_def_t = int((cfg_t["fuente"] == "por defecto (S)").sum())
+        if por_def_t:
+            st.warning(f"{por_def_t} de {len(cfg_t)} artículos de 11 Titulares cuentan por defecto (INCLUIR vacío en el Excel): "
+                       "los resultados son provisorios hasta que se marquen S o N.")
+
+        def graf_t(df, leyenda=True):
+            d = df.assign(avance_pct=df["avance"].clip(upper=1.5), etiqueta=df["estado_txt"].str[0] + " " + df["logrado"].astype(str)
+                          + " / " + df["objetivo"].map("{:.0f}".format),
+                          avance_txt=(df["avance"] * 100).map("{:.0f}%".format), faltan_txt=df["faltan"].map("{:.0f}".format),
+                          esperado_txt=df["esperado_valor"].map("{:.0f}".format),
+                          esperado_pct=rt["esperado_pct"])
+            orden = list(d["nombre"])
+            y = alt.Y("nombre:N", sort=orden, title=None, axis=alt.Axis(labelOverlap=False, labelLimit=220))
+            x = alt.X("avance_pct:Q", scale=alt.Scale(domain=[0, 1.7]),
+                      axis=alt.Axis(format="%", values=[0, 0.5, 1.0, 1.5], title="Avance sobre el objetivo"))
+            col = alt.Color("estado_txt:N", title="Estado", sort=list(TB.ESTADO_CF_TXT.values()),
+                            scale=alt.Scale(domain=list(TB.ESTADO_CF_TXT.values()), range=[TB.ESTADO_COLOR[e] for e in TB.ESTADO_CF_TXT]),
+                            legend=alt.Legend(orient="top") if leyenda else None)
+            tips = [alt.Tooltip("nombre:N", title="Línea / canal"), alt.Tooltip("etiqueta:N", title="Logrado / objetivo"),
+                    alt.Tooltip("avance_txt:N", title="Avance"), alt.Tooltip("esperado_txt:N", title="Esperado a hoy"),
+                    alt.Tooltip("faltan_txt:N", title="Faltan"), alt.Tooltip("estado_txt:N", title="Estado")]
+            b = alt.Chart(d).mark_bar(size=16, cornerRadiusEnd=4).encode(y=y, x=x, color=col, tooltip=tips)
+            t = alt.Chart(d).mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=y, x=x, text="etiqueta:N")
+            e = alt.Chart(d).mark_tick(color=GRIS_MARCA, thickness=2, size=20).encode(y=y, x=alt.X("esperado_pct:Q"))
+            st.altair_chart(alt.layer(b, t, e).properties(height=alt.Step(36)), use_container_width=True)
+
+        ct = rt["canales"]
+        kt = st.columns(len(ct))
+        for colm, r in zip(kt, ct.itertuples()):
+            colm.metric(r.nombre, f"{r.logrado} de {r.objetivo:.0f}", help="Clientes distintos que califican en al menos una línea.")
+            colm.caption(f"{r.estado_txt} · faltan {r.faltan:.0f} · esperado a hoy: {r.esperado_valor:.0f}")
+        st.markdown("**Por línea**")
+        graf_t(rt["lineas"])
+        st.markdown("**Por canal**")
+        graf_t(rt["canales"])
+        st.markdown("**Detalle de OP & VTK**")
+        st.caption("Los cuatro subcanales con rubro en la base más Catering (sin rubro). Cada cliente cuenta en un solo subcanal.")
+        graf_t(rt["subcanales"], leyenda=False)
+        st.caption("La barra es el avance sobre el objetivo; la marca gris es el avance esperado a hoy. Catering no tiene rubro en "
+                   "la base (queda en 0). Sin objetivo (0) no hay semáforo.")
+        tabla_t = pd.concat([rt["lineas"].assign(Tipo="Línea"), rt["canales"].assign(Tipo="Canal"),
+                             rt["subcanales"].assign(Tipo="OP & VTK")], ignore_index=True)
+        st.dataframe(tabla_t.rename(columns={"nombre": "Nombre", "estado_txt": "Estado", "logrado": "Logrado", "objetivo": "Objetivo",
+                                             "faltan": "Faltan"}).assign(**{"Avance (%)": tabla_t["avance"] * 100})[
+            ["Tipo", "Nombre", "Estado", "Logrado", "Objetivo", "Faltan", "Avance (%)"]], hide_index=True,
+            column_config={"Avance (%)": st.column_config.NumberColumn(format="%.0f%%"),
+                           "Logrado": st.column_config.NumberColumn(format="%.0f"),
+                           "Objetivo": st.column_config.NumberColumn(format="%.0f"),
+                           "Faltan": st.column_config.NumberColumn(format="%.0f")})
+        st.download_button("Descargar 11 Titulares (CSV)", tabla_t.to_csv(index=False).encode("utf-8"),
+                           file_name=f"11_titulares_{ini_t:%Y%m}_{corte_b:%Y%m%d}.csv", mime="text/csv")
 
 # ----------------------------------------------------------------------------- pestaña por canal
 with tab_canal:

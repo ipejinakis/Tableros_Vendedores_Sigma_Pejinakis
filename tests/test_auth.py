@@ -143,3 +143,55 @@ def test_ruta_usuarios_por_defecto_es_un_archivo_dentro_de_data(tmp_path):
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = val
+
+
+# ----------------------------------------------------------------------------- sesiones persistentes
+def _con_sesiones(tmp_path):
+    us = A.UsuariosStore(tmp_path / "usuarios.json")
+    clave = us.crear("gerencia", A.ROL_GERENTE, "Gerencia")
+    us.cambiar_clave("gerencia", clave, "claveNueva123")
+    return us, A.SesionesStore(A.ruta_sesiones(tmp_path / "usuarios.json"), us)
+
+
+def test_sesion_persistente_se_valida_y_se_revoca(tmp_path):
+    us, ses = _con_sesiones(tmp_path)
+    token = ses.crear("gerencia")
+    assert token and len(token) >= 40
+    assert ses.validar(token)["usuario"] == "gerencia" and ses.validar(token)["rol"] == "gerente"
+    assert ses.validar("token-falso") is None and ses.validar(None) is None and ses.validar("") is None
+    ses.revocar(token)
+    assert ses.validar(token) is None
+
+
+def test_sesion_persistente_vence(tmp_path):
+    _, ses = _con_sesiones(tmp_path)
+    token = ses.crear("gerencia", ahora=1_000_000)
+    assert ses.validar(token, ahora=1_000_000 + 6 * 86400)
+    assert ses.validar(token, ahora=1_000_000 + 7 * 86400 + 1) is None
+
+
+def test_sesion_persistente_no_sobrevive_a_cambio_de_clave_ni_desactivacion(tmp_path):
+    us, ses = _con_sesiones(tmp_path)
+    t1 = ses.crear("gerencia")
+    us.cambiar_clave("gerencia", "claveNueva123", "otraClave456")
+    assert ses.validar(t1) is None                          # cambió la clave: la sesión vieja ya no vale
+    t2 = ses.crear("gerencia")
+    us.resetear("gerencia")
+    assert ses.validar(t2) is None                          # reset por el administrador
+    us.cambiar_clave("gerencia", us.resetear("gerencia"), "claveFinal789")
+    t3 = ses.crear("gerencia")
+    us.desactivar("gerencia")
+    assert ses.validar(t3) is None and ses.crear("gerencia") is None
+
+
+def test_sesiones_solo_guardan_hash_del_token_y_el_archivo_es_privado(tmp_path):
+    import os
+    import stat
+    _, ses = _con_sesiones(tmp_path)
+    token = ses.crear("gerencia")
+    texto = ses.ruta.read_text(encoding="utf-8")
+    assert token not in texto and "claveNueva123" not in texto
+    if os.name == "posix":
+        assert stat.S_IMODE(ses.ruta.stat().st_mode) == 0o600
+    ses.revocar_usuario("gerencia")
+    assert ses.validar(token) is None

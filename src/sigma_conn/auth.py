@@ -179,12 +179,107 @@ class UsuariosStore:
         correcta = verificar_clave(clave, guardado)
         if not d or not correcta or not d.get("activo", True):
             return None
-        return {"usuario": usuario, "rol": d["rol"], "nombre": d["nombre"], "vendedor_id": d.get("vendedor_id"),
-                "debe_cambiar": bool(d.get("debe_cambiar"))}
+        return _datos_sesion(usuario, d)
+
+    def sesion_de(self, usuario: str) -> tuple[dict, str] | None:
+        """(datos de sesión, huella de la clave) de un usuario ACTIVO, o None. Lo usa `SesionesStore` para renovar una sesión."""
+        usuario = normalizar_usuario(usuario)
+        d = self._leer().get(usuario)
+        if not d or not d.get("activo", True):
+            return None
+        return _datos_sesion(usuario, d), huella_clave(d["hash"])
+
+
+def _datos_sesion(usuario: str, d: dict) -> dict:
+    return {"usuario": usuario, "rol": d["rol"], "nombre": d["nombre"], "vendedor_id": d.get("vendedor_id"),
+            "debe_cambiar": bool(d.get("debe_cambiar"))}
+
+
+def huella_clave(hash_guardado: str) -> str:
+    """Huella corta del hash de la clave: si el usuario cambia o resetea su clave, las sesiones viejas dejan de valer."""
+    return hashlib.sha256(hash_guardado.encode()).hexdigest()[:16]
 
 
 def ve_todo(sesion: dict | None) -> bool:
     return bool(sesion) and sesion.get("rol") in ROLES_VEN_TODO
+
+
+# ----------------------------------------------------------------------------- sesiones que sobreviven a la recarga
+SESION_DIAS = 7                       # cuánto dura una sesión "mantenida" en un equipo
+COOKIE_SESION = "tableros_sesion"     # nombre de la cookie del navegador (solo guarda un token al azar)
+
+
+def ruta_sesiones(ruta_usuarios_: Path) -> Path:
+    return Path(ruta_usuarios_).with_name("sesiones.json")
+
+
+class SesionesStore:
+    """Sesiones para no pedir la clave en cada recarga (F5).
+
+    El navegador guarda una cookie con un token aleatorio (256 bits); acá solo se guarda su SHA-256, el usuario, el
+    vencimiento y la huella de su clave. Una sesión deja de valer al vencer, al salir, si el usuario se desactiva o si
+    cambia/resetea su clave. Archivo privado (permisos 600) que NO va a git; nunca contiene claves."""
+
+    def __init__(self, ruta: Path, usuarios: UsuariosStore, dias: int = SESION_DIAS):
+        self.ruta, self.usuarios, self.dias = Path(ruta), usuarios, dias
+
+    def _leer(self) -> dict:
+        if not self.ruta.exists():
+            return {}
+        try:
+            return json.loads(self.ruta.read_text(encoding="utf-8"))
+        except ValueError:
+            return {}
+
+    def _guardar(self, datos: dict) -> None:
+        self.ruta.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.ruta.with_suffix(".tmp")
+        tmp.write_text(json.dumps(datos, indent=2, sort_keys=True), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, self.ruta)
+
+    @staticmethod
+    def _id(token: str) -> str:
+        return hashlib.sha256(str(token).encode()).hexdigest()
+
+    def crear(self, usuario: str, ahora: float | None = None) -> str | None:
+        """Token nuevo para un usuario activo (None si no existe o está inactivo). Limpia las sesiones vencidas."""
+        ahora = time.time() if ahora is None else ahora
+        datos_u = self.usuarios.sesion_de(usuario)
+        if not datos_u:
+            return None
+        token = secrets.token_urlsafe(32)
+        datos = {k: v for k, v in self._leer().items() if v.get("vence", 0) > ahora}
+        datos[self._id(token)] = {"usuario": datos_u[0]["usuario"], "huella": datos_u[1], "vence": ahora + self.dias * 86400}
+        self._guardar(datos)
+        return token
+
+    def validar(self, token: str | None, ahora: float | None = None) -> dict | None:
+        """Datos de sesión (como `autenticar`) si el token vale; si no, None."""
+        if not token:
+            return None
+        ahora = time.time() if ahora is None else ahora
+        reg = self._leer().get(self._id(token))
+        if not reg or reg.get("vence", 0) <= ahora:
+            return None
+        actual = self.usuarios.sesion_de(reg["usuario"])
+        if not actual or actual[1] != reg.get("huella") or actual[0]["debe_cambiar"]:
+            return None
+        return actual[0]
+
+    def revocar(self, token: str | None) -> None:
+        if not token:
+            return
+        datos = self._leer()
+        if datos.pop(self._id(token), None) is not None:
+            self._guardar(datos)
+
+    def revocar_usuario(self, usuario: str) -> None:
+        usuario = normalizar_usuario(usuario)
+        datos = self._leer()
+        resto = {k: v for k, v in datos.items() if v.get("usuario") != usuario}
+        if len(resto) != len(datos):
+            self._guardar(resto)
 
 
 # ----------------------------------------------------------------------------- límite de intentos

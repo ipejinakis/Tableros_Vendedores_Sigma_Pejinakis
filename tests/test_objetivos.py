@@ -251,3 +251,20 @@ def test_vendedores_fuera_de_la_base():
     assert set(zip(df["tabla"], df["vendedor_id"], df["motivo"])) == {
         ("obj_mis_ventas", "999", "no está en la base"), ("cfg_vendedor_perfil", "102", "desactivado en la base")}
     assert OX.vendedores_fuera_de_la_base({"x": pd.DataFrame({"vendedor_id": ["100"]})}, base).empty
+
+
+def test_build_cfg_11_titulares_articulo():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Articulos"
+    ws.append(["LINEA 11 TITULARES", "ARTICULO_ID", "DESCRIPCION", "INCLUIR (S / N)"])
+    ws.append(["Alma Mora", "1439", "ALMA MORA RVA", None])
+    ws.append(["Trapiche Reserva", 1500, "TRAPICHE RESERVA", "s"])
+    ws.append(["Dada", "2000", "DADA 1", "N"])
+    df = OX.build_cfg_11_titulares_articulo(wb).set_index("articulo_id")
+    assert df.loc["1439", "linea"] == "ALMA_MORA" and bool(df.loc["1439", "incluir"]) and df.loc["1439", "fuente"] == "por defecto (S)"
+    assert bool(df.loc["1500", "incluir"]) and df.loc["1500", "fuente"] == "INCLUIR"
+    assert not bool(df.loc["2000", "incluir"])
+    ws.append(["Alaris", "9", "X", "quizás"])
+    with pytest.raises(ValueError):
+        OX.build_cfg_11_titulares_articulo(wb)

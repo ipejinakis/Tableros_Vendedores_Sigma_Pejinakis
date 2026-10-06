@@ -211,6 +211,31 @@ def build_cfg_club_faro_articulo(wb, hoja: str | None = None) -> pd.DataFrame:
     return df.drop_duplicates(subset=["linea", "articulo_id"], keep="last").reset_index(drop=True)
 
 
+def build_cfg_11_titulares_articulo(wb, hoja: str = "Articulos") -> pd.DataFrame:
+    """Artículos de cada línea de 11 Titulares (`articulos_11_titulares.xlsx`, hoja Articulos): LINEA 11 TITULARES,
+    ARTICULO_ID, DESCRIPCION, INCLUIR (S / N). INCLUIR vacío = cuenta (provisorio); S/N manda. Valor inválido → error."""
+    ws = wb[hoja]
+    cab = {str(c.value).strip().upper(): i for i, c in enumerate(ws[1]) if c.value is not None}
+    def col(pref):
+        for k, i in cab.items():
+            if k.startswith(pref):
+                return i
+        raise ValueError(f"{hoja}: falta la columna {pref!r}")
+    i_lin, i_id, i_desc, i_inc = col("LINEA"), col("ARTICULO_ID"), col("DESCRIPCION"), col("INCLUIR")
+    rows = []
+    for fila in ws.iter_rows(min_row=2, values_only=True):
+        if fila[i_id] is None or fila[i_lin] is None:
+            continue
+        inc = None if fila[i_inc] is None else str(fila[i_inc]).strip().upper()
+        if inc not in (None, "", "S", "N"):
+            raise ValueError(f"{hoja}: INCLUIR debe ser S o N (artículo {fila[i_id]}: {inc!r})")
+        rows.append({"linea": N.titulares_linea(fila[i_lin]), "articulo_id": str(fila[i_id]).strip(),
+                     "descripcion": str(fila[i_desc] or "").strip(), "incluir": inc != "N",
+                     "fuente": "INCLUIR" if inc in ("S", "N") else "por defecto (S)", "periodo": PERIODO_MIS_VENTAS})
+    df = pd.DataFrame(rows, columns=["linea", "articulo_id", "descripcion", "incluir", "fuente", "periodo"])
+    return df.drop_duplicates(subset=["linea", "articulo_id"], keep="last").reset_index(drop=True)
+
+
 def vendedores_fuera_de_la_base(tablas: dict, dim_vendedor: pd.DataFrame) -> pd.DataFrame:
     """Chequeo de la regla "los vendedores salen de la base": para cada tabla cargada desde un Excel o desde la config
     (`negocio.py`) con columna `vendedor_id`, lista los códigos que NO están en `dim_vendedor` o que figuran

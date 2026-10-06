@@ -113,3 +113,45 @@ CLUB_FARO_UMBRAL_NOMBRE = 0.85   # similitud mínima para aceptar un nombre "apr
 # Cruces aproximados que Juan confirmó a mano (2026-10-05): nombre del Excel (sin tildes, "?"=Ñ) -> id en la base.
 # Solo vale si ese id existe en dim_vendedor; no inventa vendedores.
 CLUB_FARO_NOMBRES_CONFIRMADOS = {"MIGUEL GONZALBEZ": "100"}
+
+
+# ----------------------------------------------------------------------------- 11 Titulares (Peñaflor)
+# Objetivos de CCC (clientes con compra) del DISTRIBUIDOR ENTERO (no por vendedor), tomados de la captura que mandó Juan
+# (2026-10-05). Orden y valores: VERIFICAR contra la captura antes de dar por buenos los semáforos.
+TITULARES_LINEAS = {
+    "ALMA_MORA": {"nombre": "Alma Mora", "objetivo": 351},
+    "TRAPICHE_RESERVA": {"nombre": "Trapiche Reserva", "objetivo": 61},
+    "FINCA_LAS_MORAS": {"nombre": "Finca Las Moras", "objetivo": 191},
+    "ALARIS": {"nombre": "Alaris", "objetivo": 262},
+    "DON_DAVID": {"nombre": "Don David", "objetivo": 76},
+    "DADA": {"nombre": "Dada", "objetivo": 270},
+    "SMIRNOFF_FLAVORS": {"nombre": "Smirnoff Flavors", "objetivo": 158},
+    "LOS_ARBOLES": {"nombre": "Los Arboles", "objetivo": 155},
+    "ANTARES": {"nombre": "Antares", "objetivo": 73},
+    "SMIRNOFF_ICE": {"nombre": "Smirnoff Ice", "objetivo": 251},
+    "GORDONS_FLAVOURS": {"nombre": "Gordons Flavours", "objetivo": 44},
+}
+# Canales por rubro del cliente en SIGMA (columna "Comercio" del listado de clientes). AS = RUBROS_AS; OP & VTK = los de
+# abajo; el resto es Tradicionales. Catering no tiene rubro en la base (queda en 0).
+TITULARES_CANALES = ("Autoservicios", "Tradicionales", "OP & VTK")
+TITULARES_OBJ_CANAL = {"Autoservicios": 66, "Tradicionales": 362, "OP & VTK": 90}
+TITULARES_SUBCANAL_RUBRO = {"16": "On Premise", "15": "On Premise Noche", "65": "Vinotecas", "75": "Tienda de Bebidas"}
+TITULARES_OBJ_SUBCANAL = {"On Premise": 0, "On Premise Noche": 0, "Vinotecas": 56, "Tienda de Bebidas": 34, "Catering": 0}
+TITULARES_UNIDADES_NO_AS = 3   # Tradicionales (TRAD / ALM): 3 unidades iguales
+TITULARES_CANALES_POR_CAJA = ("Autoservicios", "OP & VTK")   # 1 caja cerrada / bulto (OP & VTK confirmado por Juan, 2026-10-06)
+
+
+def titulares_linea(texto) -> str:
+    """Clave de línea a partir del nombre de la hoja del Excel ("Alma Mora", "Smirnoff Ice", ...)."""
+    t = " ".join(str(texto).upper().split())
+    for clave, info in TITULARES_LINEAS.items():
+        if info["nombre"].upper() == t:
+            return clave
+    raise ValueError(f"línea de 11 Titulares desconocida: {texto!r}")
+
+
+def canal_titulares(rubro_cod) -> str:
+    r = str(rubro_cod).strip()
+    if r in RUBROS_AS:
+        return "Autoservicios"
+    return "OP & VTK" if r in TITULARES_SUBCANAL_RUBRO else "Tradicionales"

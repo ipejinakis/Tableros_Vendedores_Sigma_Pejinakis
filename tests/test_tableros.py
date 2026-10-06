@@ -352,3 +352,59 @@ def test_club_faro_sin_compras_ni_objetivos_no_rompe():
     # sin objetivos en el Excel, los vendedores de la base que vendieron igual aparecen como "sin objetivo"
     assert (tabla["estado"] == "sin_objetivo").all() and (tabla["objetivo"] == 0).all() and (tabla["logrado"] > 0).all()
     assert res["por_linea"]["FRIZZE"]["objetivo"] == 0 and res["por_linea"]["FRIZZE"]["logrado"] == 0
+
+
+# ----------------------------------------------------------------------------- 11 Titulares
+def _titulares_datos():
+    art = pd.DataFrame({"articulo_id": ["T1", "T2", "NO"], "proveedor": [PEN] * 3, "division": [None] * 3,
+                        "unidades_por_bulto": [6, 6, 6]})
+    cfg = pd.DataFrame({"linea": ["ALMA_MORA", "ALMA_MORA", "DADA"], "articulo_id": ["T1", "T2", "NO"],
+                        "incluir": [True, True, False]})
+    clientes = pd.DataFrame({"cliente_id": ["as1", "as2", "tr1", "tr2", "vi1", "vi2"], "rubro_cod": ["01", "98", "02", "03", "65", "75"]})
+
+    def it(fid, art_, cli, cant, tipo="F", fecha="2026-09-10"):
+        r = av(fid, art_, cant, 1000, vend="101", fecha=fecha, tipo=tipo)
+        r["clienteId"] = cli
+        return r
+    rows = [
+        it(1, "T1", "as1", 6),                  # AS con 1 bulto (6 u): cuenta
+        it(2, "T1", "as2", 5),                  # AS con 5 u (< 1 bulto): no cuenta
+        it(3, "T1", "tr1", 3),                  # tradicional con 3 u iguales: cuenta
+        it(4, "T1", "tr2", 2),                  # tradicional con 2 u: no
+        it(5, "T1", "tr2", 1), it(6, "T2", "tr2", 2),   # 2+1 de T1 = 3 en el mismo artículo -> cuenta; T2 con 2 no
+        it(7, "T1", "vi1", 6),                  # vinoteca = OP & VTK, 1 caja cerrada (6 u): cuenta (subcanal Vinotecas)
+        it(11, "T1", "vi2", 3),                 # OP & VTK con 3 u (media caja): no cuenta, la regla es la caja cerrada
+        it(8, "NO", "tr1", 10),                 # artículo con INCLUIR = N: no cuenta
+        it(9, "T1", "as2", 6, tipo="C"),        # NC: no cuenta
+        it(10, "T1", "as2", 6, fecha="2026-09-25"),   # posterior al corte
+    ]
+    facs = [fa(r["id"], tipo=r["comprobanteTipo"], fecha=r["fecha"], vend=r["vendedor"]) for r in rows]
+    return T.build_fact_ventas(rows, facs), art, clientes, cfg
+
+
+def test_titulares_compras_reglas_por_canal():
+    ventas, art, clientes, cfg = _titulares_datos()
+    c = TB.titulares_compras(ventas, art, clientes, cfg, date(2026, 9, 1), date(2026, 9, 20))
+    assert sorted(c["cliente_id"]) == ["as1", "tr1", "tr2", "vi1"]
+    assert set(c["linea"]) == {"ALMA_MORA"}
+    assert c.set_index("cliente_id").loc["vi1", "subcanal"] == "Vinotecas"
+    assert c.set_index("cliente_id").loc["as1", "canal"] == "Autoservicios"
+
+
+def test_titulares_resumen_lineas_canales_y_subcanales():
+    ventas, art, clientes, cfg = _titulares_datos()
+    r = TB.titulares_resumen(ventas, art, clientes, cfg, date(2026, 9, 1), date(2026, 10, 31), date(2026, 9, 20))
+    assert len(r["lineas"]) == 11
+    assert r["lineas"].set_index("linea").loc["ALMA_MORA", "logrado"] == 4
+    assert r["lineas"].set_index("linea").loc["ALMA_MORA", "objetivo"] == 351
+    can = r["canales"].set_index("nombre")
+    assert can.loc["Autoservicios", "logrado"] == 1 and can.loc["Tradicionales", "logrado"] == 2 and can.loc["OP & VTK", "logrado"] == 1
+    sub = r["subcanales"].set_index("nombre")
+    assert sub.loc["Vinotecas", "logrado"] == 1 and sub.loc["Vinotecas", "objetivo"] == 56
+    assert sub.loc["Catering", "estado"] == "sin_objetivo" and sub.loc["On Premise", "avance"] == 0.0
+
+
+def test_titulares_sin_ventas_no_rompe():
+    ventas, art, clientes, cfg = _titulares_datos()
+    r = TB.titulares_resumen(ventas.iloc[0:0], art, clientes, cfg, date(2026, 9, 1), date(2026, 10, 31), date(2026, 9, 20))
+    assert (r["lineas"]["logrado"] == 0).all()

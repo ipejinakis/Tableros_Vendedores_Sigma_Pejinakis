@@ -380,6 +380,61 @@ def club_faro_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_c
     return tabla, resumen
 
 
+# ----------------------------------------------------------------------------- 11 Titulares (Peñaflor, distribuidor)
+def titulares_compras(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_cliente: pd.DataFrame,
+                      cfg_art: pd.DataFrame, inicio: date, corte: date) -> pd.DataFrame:
+    """Clientes que califican en cada línea de 11 Titulares: una fila por (cliente, línea) con canal y subcanal.
+
+    Base: `ventas_para_objetivos` sin NC (no descuentan), unidades > 0, entre `inicio` y `corte`, solo artículos con INCLUIR.
+    Un cliente califica en una línea si, en UN mismo artículo de la línea, compró lo mínimo de su canal: Autoservicios y
+    OP & VTK = 1 caja cerrada/bulto (unidades >= unidades por bulto); Tradicionales = 3 unidades iguales
+    (`TITULARES_UNIDADES_NO_AS`)."""
+    v = T.ventas_para_objetivos(ventas, dim_articulo)
+    f = pd.to_datetime(v["fecha"])
+    v = v[(f >= pd.Timestamp(inicio)) & (f <= pd.Timestamp(corte)) & ~v["es_nc"].astype(bool) & (v["unidades"] > 0)]
+    art = cfg_art[cfg_art["incluir"].astype(bool)][["articulo_id", "linea"]].rename(columns={"linea": "linea_t"}).assign(
+        articulo_id=lambda d: d["articulo_id"].astype("string"))   # `linea` ya existe en ventas (línea de SIGMA)
+    v = v.assign(articulo_id=v["articulo_id"].astype("string"), cliente_id=v["cliente_id"].astype("string")).merge(
+        art, on="articulo_id", how="inner")
+    cols = ["cliente_id", "linea", "canal", "subcanal"]
+    if v.empty:
+        return pd.DataFrame(columns=cols)
+    g = v.groupby(["cliente_id", "linea_t", "articulo_id"], as_index=False)["unidades"].sum()
+    da = dim_articulo.drop_duplicates("articulo_id").assign(articulo_id=lambda d: d["articulo_id"].astype("string"))
+    upb = da.set_index("articulo_id")["unidades_por_bulto"] if "unidades_por_bulto" in da.columns else pd.Series(dtype=float)
+    g["upb"] = pd.to_numeric(g["articulo_id"].map(upb), errors="coerce").fillna(1).clip(lower=1)
+    dc = dim_cliente.drop_duplicates("cliente_id").assign(cliente_id=lambda d: d["cliente_id"].astype("string")).set_index("cliente_id")
+    g["rubro_cod"] = g["cliente_id"].map(dc["rubro_cod"]).astype("string")
+    g["canal"] = g["rubro_cod"].map(N.canal_titulares)
+    g["subcanal"] = g["rubro_cod"].map(N.TITULARES_SUBCANAL_RUBRO)
+    minimo = g["upb"].where(g["canal"].isin(N.TITULARES_CANALES_POR_CAJA), float(N.TITULARES_UNIDADES_NO_AS))
+    ok = g[g["unidades"] >= minimo]
+    return ok.rename(columns={"linea_t": "linea"})[cols].drop_duplicates(["cliente_id", "linea"]).reset_index(drop=True)
+
+
+def titulares_resumen(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_cliente: pd.DataFrame, cfg_art: pd.DataFrame,
+                      inicio: date, fin: date, corte: date) -> dict:
+    """CCC de 11 Titulares del distribuidor: por línea, por canal y por subcanal de OP & VTK, contra sus objetivos.
+
+    Devuelve {'lineas', 'canales', 'subcanales'} (DataFrames con logrado, objetivo, avance, esperado_valor, faltan, estado)
+    y 'esperado_pct'. Por canal/subcanal el logrado son clientes distintos que califican en AL MENOS una línea."""
+    c = titulares_compras(ventas, dim_articulo, dim_cliente, cfg_art, inicio, corte)
+    esperado = fraccion_esperada(inicio, fin, corte)
+
+    def fila(nombre, logrado, objetivo, **extra):
+        av = logrado / objetivo if objetivo else 0.0
+        est = estado_avance(av, esperado) if objetivo else "sin_objetivo"
+        return {**extra, "nombre": nombre, "logrado": int(logrado), "objetivo": float(objetivo), "avance": av,
+                "esperado_valor": objetivo * esperado, "faltan": max(objetivo - logrado, 0.0), "estado": est,
+                "estado_txt": ESTADO_CF_TXT[est]}
+    lineas = pd.DataFrame([fila(i["nombre"], c.loc[c["linea"] == k, "cliente_id"].nunique(), i["objetivo"], linea=k)
+                           for k, i in N.TITULARES_LINEAS.items()])
+    canales = pd.DataFrame([fila(k, c.loc[c["canal"] == k, "cliente_id"].nunique(), N.TITULARES_OBJ_CANAL[k]) for k in N.TITULARES_CANALES])
+    sub = [fila(k, c.loc[c["subcanal"] == k, "cliente_id"].nunique(), o) for k, o in N.TITULARES_OBJ_SUBCANAL.items()]
+    return {"lineas": lineas, "canales": canales, "subcanales": pd.DataFrame(sub), "esperado_pct": esperado,
+            "inicio": inicio, "fin": fin, "corte": corte}
+
+
 # ----------------------------------------------------------------------------- formato (es-AR)
 def fmt_pesos(x) -> str:
     """$ 1.234.567 (punto de miles, sin decimales)."""
