@@ -36,7 +36,7 @@ if len(faltan):
     print("AVISO: artículos del Excel que no existen en la base:\n", faltan[["linea", "articulo_id", "descripcion"]])
 dup = cfg[cfg.duplicated("articulo_id", keep=False)].sort_values("articulo_id")
 if len(dup):
-    print("AVISO: artículos que están en más de una línea (cuentan en las dos):\n", dup[["linea", "articulo_id", "descripcion"]])
+    print("Info: artículos que están en más de una línea (cuentan en las dos; los TRAPICHE ALARIS están confirmados así por el jefe de ventas, 2026-10-06):\n", dup[["linea", "articulo_id", "descripcion"]])
 
 store.write_table("cfg_11_titulares_articulo", cfg)
 print(f"\ncfg_11_titulares_articulo: {len(cfg)} artículos")
