@@ -29,6 +29,26 @@ def _limitador() -> A.Limitador:
     return A.Limitador(max_intentos=5, bloqueo_s=300)
 
 
+@st.cache_resource
+def _limitador_ip() -> A.Limitador:
+    return A.Limitador(max_intentos=20, bloqueo_s=600)       # 20 fallos seguidos desde una misma IP: 10 minutos de pausa
+
+
+def _ip_cliente() -> str:
+    """IP del visitante: detrás de Cloudflare viene en `Cf-Connecting-Ip`; si no, `X-Forwarded-For`; si no, '?'.
+    Los encabezados los puede falsear quien llegue directo por la red interna: sirve para registro y freno, no como prueba."""
+    try:
+        h = st.context.headers
+        ip = h.get("Cf-Connecting-Ip") or (h.get("X-Forwarded-For") or "").split(",")[0].strip() or h.get("X-Real-Ip")
+        return ip or "?"
+    except Exception:
+        return "?"
+
+
+def _auditoria(store: A.UsuariosStore) -> A.Auditoria:
+    return A.Auditoria(A.ruta_auditoria(store.ruta))
+
+
 def _sesiones(store: A.UsuariosStore) -> A.SesionesStore:
     return A.SesionesStore(A.ruta_sesiones(store.ruta), store)
 
@@ -65,7 +85,7 @@ def _formulario_cambio(store: A.UsuariosStore, usuario: str, clave: str, obligat
     """Dibuja el formulario de cambio de clave; devuelve True si se cambió."""
     with st.form(f"cambio_{clave}", clear_on_submit=True):
         actual = st.text_input("Clave actual", type="password")
-        nueva = st.text_input("Clave nueva (mínimo 8, con letras y números)", type="password")
+        nueva = st.text_input("Clave nueva (mínimo 10, con letras y números, sin palabras obvias)", type="password")
         repetida = st.text_input("Repetir clave nueva", type="password")
         enviar = st.form_submit_button("Cambiar clave")
     if enviar:
@@ -78,6 +98,7 @@ def _formulario_cambio(store: A.UsuariosStore, usuario: str, clave: str, obligat
             st.error(str(exc))
             return False
         st.success("Clave cambiada.")
+        _auditoria(store).registrar("clave_cambiada", usuario, _ip_cliente())
         return True
     return False
 
@@ -118,20 +139,25 @@ def requerir_login() -> dict:
                                help="Si es una computadora compartida, destildalo: así tendrás que ingresar de nuevo al recargar.")
         entrar = st.form_submit_button("Entrar")
     if entrar:
-        lim = _limitador()
-        espera = lim.segundos_bloqueado(usuario)
+        lim, lim_ip, ip, aud = _limitador(), _limitador_ip(), _ip_cliente(), _auditoria(store)
+        espera = max(lim.segundos_bloqueado(usuario), lim_ip.segundos_bloqueado(f"ip:{ip}") if ip != "?" else 0)
         if espera:
+            aud.registrar("ingreso_bloqueado", usuario, ip)
             st.error(f"Demasiados intentos. Probá de nuevo en {espera // 60 + 1} minuto(s).")
         else:
             sesion = store.autenticar(usuario, clave)
             if sesion:
                 lim.ok(usuario)
+                aud.registrar("ingreso_ok", sesion["usuario"], ip)
                 st.session_state["usuario"] = sesion
                 st.session_state["_mantener"] = mantener
                 if mantener and not sesion.get("debe_cambiar"):
                     _recordar(store, sesion["usuario"])
                 st.rerun()
             lim.fallo(usuario)
+            if ip != "?":
+                lim_ip.fallo(f"ip:{ip}")
+            aud.registrar("ingreso_fallido", usuario, ip)
             st.error("Usuario o clave incorrectos.")
     st.stop()
 
@@ -148,7 +174,9 @@ def barra_usuario(sesion: dict) -> None:
             _aplicar_cookie()
     if sb.button("Salir"):
         token = st.session_state.get("_token") or _cookie_del_navegador()
-        _sesiones(A.UsuariosStore(A.ruta_usuarios())).revocar(token)
+        _almacen = A.UsuariosStore(A.ruta_usuarios())
+        _sesiones(_almacen).revocar(token)
+        _auditoria(_almacen).registrar("salida", sesion["usuario"], _ip_cliente())
         st.session_state.clear()
         st.session_state["_cookie_accion"] = ("borrar", "")
         st.rerun()

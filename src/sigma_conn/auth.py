@@ -30,7 +30,7 @@ ROL_GERENTE, ROL_SUPERVISOR, ROL_VENDEDOR = "gerente", "supervisor", "vendedor"
 ROLES = (ROL_GERENTE, ROL_SUPERVISOR, ROL_VENDEDOR)
 ROLES_VEN_TODO = (ROL_GERENTE, ROL_SUPERVISOR)
 
-CLAVE_MIN = 8
+CLAVE_MIN = 10
 _ALFABETO = "abcdefghijkmnpqrstuvwxyz23456789"          # sin caracteres confusos (0/o, 1/l)
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2 ** 14, 8, 1
 
@@ -65,11 +65,30 @@ def generar_clave(largo: int = 10) -> str:
     return "".join(secrets.choice(_ALFABETO) for _ in range(largo))
 
 
-def validar_clave_nueva(clave: str) -> None:
+# Claves que cualquiera prueba primero (lista corta a propósito: con mínimo de 10 y letras+números, esto corta lo obvio)
+CLAVES_COMUNES = frozenset({
+    "password", "contrasena", "contraseña", "qwerty", "qwertyuiop", "abcdefghij", "asdfghjkl", "admin", "administrador",
+    "bienvenido", "bienvenida", "123456789a", "1234567890", "a123456789", "pejinakis", "pejinakiscontrol", "tableros",
+    "tablero", "ventas", "vendedor", "vendedores", "gerente", "gerencia", "supervisor", "sigma", "salta", "jujuy",
+    "argentina", "hola", "holamundo", "clave", "mipassword", "miclave", "cambiame", "unilever", "penaflor",
+})
+_SUFIJOS = "0123456789!@#$%.*_-"
+
+
+def validar_clave_nueva(clave: str, usuario: str | None = None) -> None:
     if len(clave) < CLAVE_MIN:
         raise AuthError(f"La clave debe tener al menos {CLAVE_MIN} caracteres.")
     if clave.isdigit() or clave.isalpha():
         raise AuthError("La clave debe combinar letras y números.")
+    base = clave.lower().strip(_SUFIJOS)
+    if clave.lower() in CLAVES_COMUNES or base in CLAVES_COMUNES:
+        raise AuthError("Esa clave es demasiado común (o es una palabra obvia con números): elegí otra.")
+    if len(base) < 3:
+        raise AuthError("La clave es casi solo números: sumá más letras.")
+    if len(set(clave.lower())) <= 3:
+        raise AuthError("La clave es demasiado repetitiva: elegí otra.")
+    if usuario and normalizar_usuario(usuario) and normalizar_usuario(usuario) in clave.lower():
+        raise AuthError("La clave no puede contener tu usuario.")
 
 
 # ----------------------------------------------------------------------------- almacenamiento
@@ -156,7 +175,7 @@ class UsuariosStore:
         d = datos.get(usuario)
         if not d or not verificar_clave(actual, d["hash"]):
             raise AuthError("La clave actual no es correcta.")
-        validar_clave_nueva(nueva)
+        validar_clave_nueva(nueva, usuario)
         if verificar_clave(nueva, d["hash"]):
             raise AuthError("La clave nueva tiene que ser distinta de la actual.")
         d.update({"hash": hash_clave(nueva), "debe_cambiar": False})
@@ -280,6 +299,45 @@ class SesionesStore:
         resto = {k: v for k, v in datos.items() if v.get("usuario") != usuario}
         if len(resto) != len(datos):
             self._guardar(resto)
+
+
+# ----------------------------------------------------------------------------- registro de auditoría
+class Auditoria:
+    """Registro de ingresos (quién entró, cuándo, desde qué IP y los intentos fallidos) en un archivo de líneas JSON.
+
+    Nunca guarda claves. El usuario tipeado en un intento fallido solo se registra si parece un usuario (letras, números,
+    punto y guion bajo, hasta 30 caracteres): así una clave escrita por error en ese campo no queda en el archivo.
+    Archivo privado (permisos 600); al pasar de `max_bytes` se rota a `.1` (se conserva una copia)."""
+
+    def __init__(self, ruta: Path, max_bytes: int = 5_000_000):
+        self.ruta, self.max_bytes = Path(ruta), max_bytes
+
+    @staticmethod
+    def _usuario_seguro(usuario) -> str:
+        u = normalizar_usuario(usuario or "")
+        return u if u and len(u) <= 30 and u.replace(".", "").replace("_", "").isalnum() else "<no válido>"
+
+    def registrar(self, evento: str, usuario: str | None = None, ip: str | None = None, extra: str | None = None) -> None:
+        try:
+            self.ruta.parent.mkdir(parents=True, exist_ok=True)
+            if self.ruta.exists() and self.ruta.stat().st_size > self.max_bytes:
+                os.replace(self.ruta, self.ruta.with_name(self.ruta.name + ".1"))
+            from zoneinfo import ZoneInfo
+            reg = {"ts": datetime.now(ZoneInfo("America/Argentina/Salta")).isoformat(timespec="seconds"), "evento": evento,
+                   "usuario": self._usuario_seguro(usuario), "ip": str(ip or "?")[:45]}
+            if extra:
+                reg["extra"] = str(extra)[:80]
+            nuevo = not self.ruta.exists()
+            with self.ruta.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(reg, ensure_ascii=False) + "\n")
+            if nuevo:
+                os.chmod(self.ruta, 0o600)
+        except OSError:
+            pass            # el registro nunca debe impedir que alguien entre
+
+
+def ruta_auditoria(ruta_usuarios_: Path) -> Path:
+    return Path(ruta_usuarios_).with_name("auditoria.log")
 
 
 # ----------------------------------------------------------------------------- límite de intentos

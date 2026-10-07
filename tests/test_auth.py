@@ -32,7 +32,30 @@ def test_validar_clave_nueva():
         A.validar_clave_nueva("sololetrasaqui")
     with pytest.raises(A.AuthError):
         A.validar_clave_nueva("123456789")
-    A.validar_clave_nueva("letras123")
+    A.validar_clave_nueva("letras12345")
+    with pytest.raises(A.AuthError):
+        A.validar_clave_nueva("letras123")                      # 9 caracteres: el mínimo es 10
+
+
+def test_validar_clave_rechaza_comunes_repetitivas_y_con_el_usuario():
+    for mala in ("password123", "Pejinakis2026", "tableros2026", "contrasena99", "Qwerty12345", "aaaabbbb1111", "1234567890a"):
+        with pytest.raises(A.AuthError):
+            A.validar_clave_nueva(mala)
+    with pytest.raises(A.AuthError):
+        A.validar_clave_nueva("miusuario8472x", "MiUsuario")      # contiene el usuario
+    A.validar_clave_nueva("Verde-Mesa-4821")
+
+
+def test_auditoria_registra_sin_claves_y_con_permiso_privado(tmp_path):
+    aud = A.Auditoria(tmp_path / "auth" / "auditoria.log", max_bytes=10_000)
+    aud.registrar("ingreso_ok", "101", "1.2.3.4")
+    aud.registrar("ingreso_fallido", "MiClaveSecreta con espacios!!", "1.2.3.4")        # una clave tipeada en el campo usuario
+    texto = (tmp_path / "auth" / "auditoria.log").read_text(encoding="utf-8")
+    lineas = [json.loads(x) for x in texto.splitlines()]
+    assert [l["evento"] for l in lineas] == ["ingreso_ok", "ingreso_fallido"]
+    assert lineas[0]["usuario"] == "101" and lineas[0]["ip"] == "1.2.3.4" and lineas[0]["ts"].endswith("-03:00")
+    assert lineas[1]["usuario"] == "<no válido>" and "Secreta" not in texto
+    assert stat.S_IMODE(os.stat(tmp_path / "auth" / "auditoria.log").st_mode) == 0o600
 
 
 def test_crear_y_autenticar_con_clave_temporal(tmp_path):
