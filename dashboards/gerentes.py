@@ -162,7 +162,7 @@ if solo_con_venta:
 # ----------------------------------------------------------------------------- encabezado
 mostrar_logo(180)
 st.title("Facturación por vendedor")
-datos_al = (meta or {}).get("written_at", "s/d")
+datos_al = TB.fmt_actualizado(meta)
 st.caption(
     f"Mes {mes} · corte {corte:%d/%m/%Y} · datos actualizados {datos_al} · neto sin IVA, todos los canales "
     "(Axum, Compre Ahora y Directa; las notas de crédito restan). No cuenta anuladas, Depósito Morillo ni "

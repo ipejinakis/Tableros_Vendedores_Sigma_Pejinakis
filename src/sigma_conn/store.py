@@ -16,6 +16,7 @@ import json
 import os
 import tempfile
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import pandas as pd
@@ -140,7 +141,7 @@ class Store:
     # ------------------------------------------------------------------ metadatos
     def write_meta(self, payload: dict) -> None:
         self.meta.mkdir(parents=True, exist_ok=True)
-        payload = {**payload, "written_at": datetime.now().isoformat(timespec="seconds")}
+        payload = {**payload, "written_at": datetime.now(ZoneInfo("America/Argentina/Salta")).isoformat(timespec="seconds")}   # hora de Salta aunque el servidor esté en UTC
         tmp = self.meta / "last_run.json.tmp"
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
         os.replace(tmp, self.meta / "last_run.json")

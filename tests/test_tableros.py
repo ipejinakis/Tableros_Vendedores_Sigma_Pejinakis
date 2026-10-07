@@ -437,3 +437,9 @@ def test_ventas_sin_escala_por_vendedor_y_canal():
     assert list(t["vendedor_id"]) == ["100", "999"]                  # una fila por vendedor pedido, aunque no haya vendido
     assert t.loc[0, "vendido"] > 0 and t.loc[1, "vendido"] == 0
     assert t.loc[0, "vendido"] == pytest.approx(t.loc[0, list(TB.CANALES)].sum())
+
+
+def test_fmt_actualizado():
+    assert TB.fmt_actualizado({"written_at": "2026-10-07T11:24:10-03:00"}) == "07/10/2026 11:24"
+    assert TB.fmt_actualizado({"written_at": "2026-10-07T09:13:52"}) == "07/10/2026 09:13"
+    assert TB.fmt_actualizado(None) == "s/d" and TB.fmt_actualizado({}) == "s/d" and TB.fmt_actualizado({"written_at": "xx"}) == "s/d"

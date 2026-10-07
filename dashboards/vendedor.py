@@ -91,7 +91,7 @@ del tabla_total                            # a partir de acá solo existe la fil
 
 mostrar_logo(180)
 st.title(f"Hola, {_sesion['nombre']}")
-st.caption(f"Mes {mes} · corte {corte:%d/%m/%Y} · datos actualizados {(meta or {}).get('written_at', 's/d')} · "
+st.caption(f"Mes {mes} · corte {corte:%d/%m/%Y} · datos actualizados {TB.fmt_actualizado(meta)} · "
            "neto sin IVA, todos los canales (las notas de crédito restan).")
 if ultimo and corte > ultimo:
     st.warning(f"No hay ventas posteriores al {ultimo:%d/%m/%Y}.")

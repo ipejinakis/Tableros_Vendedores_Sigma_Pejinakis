@@ -7,7 +7,7 @@ muebles de Unilever; todos los canales, las NC restan).
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -462,6 +462,15 @@ def titulares_resumen(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_clie
 
 
 # ----------------------------------------------------------------------------- formato (es-AR)
+def fmt_actualizado(meta) -> str:
+    """'07/10/2026 11:24' a partir del `written_at` de la última corrida del ETL; 's/d' si no hay dato."""
+    try:
+        return datetime.fromisoformat(str((meta or {})["written_at"])).strftime("%d/%m/%Y %H:%M")
+    except (KeyError, ValueError, TypeError):
+        return "s/d"
+
+
+
 def fmt_pesos(x) -> str:
     """$ 1.234.567 (punto de miles, sin decimales)."""
     if x is None or x != x:
