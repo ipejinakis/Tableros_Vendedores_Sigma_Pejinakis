@@ -5,8 +5,8 @@ Cloudflare Tunnel + Access (vendedores desde el celular) queda para después: ve
 
 ## Qué hay en esta carpeta
 - `subir.sh` (Mac): sube el último commit al servidor, y con `--con-datos` / `--con-env` también `data/silver`, `usuarios.json` y `.env`.
-- `instalar_en_servidor.sh` (servidor, con sudo): crea el usuario de servicio `tableros`, instala en `/opt/tableros-sigma`, arma el venv, el servicio systemd, el cron y la rotación de logs. Se puede correr de nuevo para actualizar.
-- `tableros.service`, `cron-tableros`, `logrotate-tableros`: plantillas que usa el instalador.
+- `instalar_en_servidor.sh` (servidor, con sudo): crea el usuario de servicio `tablero-sigma`, instala en `/opt/tableros-sigma`, arma el venv, el servicio systemd, el cron y la rotación de logs. Se puede correr de nuevo para actualizar.
+- `tablero-sigma.service`, `cron-tableros`, `logrotate-tableros`: plantillas que usa el instalador.
 
 ## Primera vez
 1. **En la Mac:** commit y push de todo lo pendiente (`git status` limpio), porque `subir.sh` se niega a subir con cambios sin commitear.
@@ -28,7 +28,7 @@ Cloudflare Tunnel + Access (vendedores desde el celular) queda para después: ve
 5. **Probar:** entrar con un gerente y con un vendedor; el vendedor no tiene que ver datos de otro. Probar F5 (sesión persistente) y desde el celular.
 6. **Primer ETL en el servidor** (para verificar token y red, antes de esperar al cron):
    ```bash
-   sudo -u tableros bash -c 'cd /opt/tableros-sigma && venv/bin/python scripts/etl/run_etl.py --solo ventas'
+   sudo -u tablero-sigma bash -c 'cd /opt/tableros-sigma && venv/bin/python scripts/etl/run_etl.py --solo ventas'
    ```
 
 ## Actualizar el código más adelante
@@ -36,11 +36,11 @@ Commit + push en la Mac, después `bash deploy/subir.sh usuario@servidor` y en e
 Si cambian objetivos o artículos (los Excel): correr los `cargar_*.py` en la Mac y subir con `--con-datos`.
 
 ## Operación
-- Estado: `systemctl status tableros` · logs de la app: `journalctl -u tableros -f` · logs del ETL: `/var/log/tableros/etl.log`.
-- Reiniciar: `sudo systemctl restart tableros` (obligatorio tras tocar `src/`).
-- El cron usa la hora del servidor: tiene que ser `America/Argentina/Salta` (`timedatectl`). Si no, `sudo timedatectl set-timezone America/Argentina/Salta`.
+- Estado: `systemctl status tablero-sigma` · logs de la app: `journalctl -u tablero-sigma -f` · logs del ETL: `/var/log/tablero-sigma/etl.log`.
+- Reiniciar: `sudo systemctl restart tablero-sigma` (obligatorio tras tocar `src/`).
+- El servidor está en UTC y no se cambia (otros tableros pueden depender de eso): el cron está escrito en UTC, 09:00 UTC = 06:00 Salta y 19:00 UTC = 16:00 Salta (Argentina no tiene horario de verano).
 - Backup: copiar `/opt/tableros-sigma/data/auth/usuarios.json` fuera de la VM de vez en cuando (solo hashes).
-- Permisos: `data/` 700, `.env` 600, usuario `tableros` sin sudo ni shell. No abrir el puerto 8510 hacia afuera.
+- Permisos: `data/` 700, `.env` 600, usuario `tablero-sigma` sin sudo ni shell. No abrir el puerto 8510 hacia afuera.
 
 ## Pendiente para la etapa 2
 Dominio `pejinakiscontrol.com`, Cloudflare Tunnel + Access, mínimo de clave 10 y lista de claves comunes, registro de auditoría (docs 08 y 09).

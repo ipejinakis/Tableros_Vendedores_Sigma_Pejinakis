@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Corre en el SERVIDOR (Ubuntu), con sudo, después de deploy/subir.sh. Es idempotente: sirve para instalar y para actualizar.
 #   sudo bash ~/tableros-sigma-deploy/code/deploy/instalar_en_servidor.sh
-# Variables opcionales: APP_DIR (default /opt/tableros-sigma), PUERTO (default 8510), USUARIO_SERVICIO (default tableros).
+# Variables opcionales: APP_DIR (default /opt/tableros-sigma), PUERTO (default 8510), USUARIO_SERVICIO (default tablero-sigma).
 set -euo pipefail
 
 [ "$(id -u)" = 0 ] || { echo "Correr con sudo."; exit 1; }
 APP_DIR="${APP_DIR:-/opt/tableros-sigma}"
 PUERTO="${PUERTO:-8510}"
-SVC_USER="${USUARIO_SERVICIO:-tableros}"
+SVC_USER="${USUARIO_SERVICIO:-tablero-sigma}"
 ORIGEN="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"        # .../tableros-sigma-deploy/code
 STAGE="$(dirname "$ORIGEN")"                                          # .../tableros-sigma-deploy
-LOG_DIR=/var/log/tableros
+LOG_DIR=/var/log/tablero-sigma
 
 echo "== Paquetes =="
 apt-get update -qq
@@ -52,21 +52,21 @@ find "$APP_DIR/data/auth" -type f -exec chmod 600 {} \; 2>/dev/null || true
 
 echo "== Servicio systemd (127.0.0.1:$PUERTO) =="
 sed -e "s|@APP_DIR@|$APP_DIR|g" -e "s|@PUERTO@|$PUERTO|g" -e "s|@SVC_USER@|$SVC_USER|g" \
-    "$APP_DIR/deploy/tableros.service" > /etc/systemd/system/tableros.service
+    "$APP_DIR/deploy/tablero-sigma.service" > /etc/systemd/system/tablero-sigma.service
 systemctl daemon-reload
-systemctl enable tableros >/dev/null
-systemctl restart tableros
+systemctl enable tablero-sigma >/dev/null
+systemctl restart tablero-sigma
 
-echo "== Cron del ETL (06:00 completo, 16:00 solo ventas) y rotación de logs =="
-sed -e "s|@APP_DIR@|$APP_DIR|g" -e "s|@SVC_USER@|$SVC_USER|g" "$APP_DIR/deploy/cron-tableros" > /etc/cron.d/tableros
-chmod 644 /etc/cron.d/tableros
-cp "$APP_DIR/deploy/logrotate-tableros" /etc/logrotate.d/tableros
+echo "== Cron del ETL (06:00 y 16:00 de Salta = 09:00 y 19:00 UTC) y rotación de logs =="
+sed -e "s|@APP_DIR@|$APP_DIR|g" -e "s|@SVC_USER@|$SVC_USER|g" "$APP_DIR/deploy/cron-tableros" > /etc/cron.d/tablero-sigma
+chmod 644 /etc/cron.d/tablero-sigma
+cp "$APP_DIR/deploy/logrotate-tableros" /etc/logrotate.d/tablero-sigma
 
 sleep 3
 echo
-systemctl --no-pager --lines=0 status tableros | head -5 || true
-echo "Escuchando:"; ss -ltn | grep ":$PUERTO " || echo "  (todavía no escucha: mirá 'journalctl -u tableros -n 50')"
-echo "Zona horaria del servidor: $(timedatectl show -p Timezone --value 2>/dev/null || date +%Z)  (el cron usa esa hora; debería ser America/Argentina/Salta)"
+systemctl --no-pager --lines=0 status tablero-sigma | head -5 || true
+echo "Escuchando:"; ss -ltn | grep ":$PUERTO " || echo "  (todavía no escucha: mirá 'journalctl -u tablero-sigma -n 50')"
+echo "Zona horaria del servidor: $(timedatectl show -p Timezone --value 2>/dev/null || date +%Z). El cron está escrito en UTC: 09:00 UTC = 06:00 Salta y 19:00 UTC = 16:00 Salta."
 echo
 echo "Siguiente paso (acceso por Tailscale con HTTPS):"
 echo "  sudo tailscale serve --bg --https=8443 http://127.0.0.1:$PUERTO"

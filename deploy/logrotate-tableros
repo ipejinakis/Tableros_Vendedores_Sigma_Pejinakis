@@ -1,4 +1,4 @@
-/var/log/tableros/*.log {
+/var/log/tablero-sigma/*.log {
     weekly
     rotate 8
     compress
