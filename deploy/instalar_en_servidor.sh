@@ -8,7 +8,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/tableros-sigma}"
 PUERTO="${PUERTO:-8510}"
 SVC_USER="${USUARIO_SERVICIO:-tablero-sigma}"
-ORIGEN="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"        # .../tableros-sigma-deploy/code
+ORIGEN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"           # .../tableros-sigma-deploy/code (raíz del repo)
 STAGE="$(dirname "$ORIGEN")"                                          # .../tableros-sigma-deploy
 LOG_DIR=/var/log/tablero-sigma
 
