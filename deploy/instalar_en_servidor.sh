@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Corre en el SERVIDOR (Ubuntu), con sudo, después de deploy/subir.sh. Es idempotente: sirve para instalar y para actualizar.
 #   sudo bash ~/tableros-sigma-deploy/code/deploy/instalar_en_servidor.sh
-# Variables opcionales: APP_DIR (default /opt/tableros-sigma), PUERTO (default 8510), USUARIO_SERVICIO (default tablero-sigma).
+# Variables opcionales: APP_DIR (default /opt/tableros-sigma), PUERTO (default 8510), BIND (default 0.0.0.0), USUARIO_SERVICIO (default tablero-sigma).
 set -euo pipefail
 
 [ "$(id -u)" = 0 ] || { echo "Correr con sudo."; exit 1; }
 APP_DIR="${APP_DIR:-/opt/tableros-sigma}"
 PUERTO="${PUERTO:-8510}"
+BIND="${BIND:-0.0.0.0}"          # 0.0.0.0 = red interna + Tailscale (como los otros tableros); 127.0.0.1 = solo tailscale serve
 SVC_USER="${USUARIO_SERVICIO:-tablero-sigma}"
 ORIGEN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"           # .../tableros-sigma-deploy/code (raíz del repo)
 STAGE="$(dirname "$ORIGEN")"                                          # .../tableros-sigma-deploy
@@ -50,8 +51,8 @@ chmod 700 "$APP_DIR/data"
 [ -f "$APP_DIR/.env" ] && chmod 600 "$APP_DIR/.env"
 find "$APP_DIR/data/auth" -type f -exec chmod 600 {} \; 2>/dev/null || true
 
-echo "== Servicio systemd (127.0.0.1:$PUERTO) =="
-sed -e "s|@APP_DIR@|$APP_DIR|g" -e "s|@PUERTO@|$PUERTO|g" -e "s|@SVC_USER@|$SVC_USER|g" \
+echo "== Servicio systemd ($BIND:$PUERTO) =="
+sed -e "s|@APP_DIR@|$APP_DIR|g" -e "s|@PUERTO@|$PUERTO|g" -e "s|@BIND@|$BIND|g" -e "s|@SVC_USER@|$SVC_USER|g" \
     "$APP_DIR/deploy/tablero-sigma.service" > /etc/systemd/system/tablero-sigma.service
 systemctl daemon-reload
 systemctl enable tablero-sigma >/dev/null

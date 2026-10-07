@@ -1,6 +1,6 @@
 # Despliegue en el servidor (VM `n8npeji`, Ubuntu)
 
-Primera etapa: Streamlit en `127.0.0.1` del servidor y acceso por **Tailscale** con HTTPS (`tailscale serve`).
+Primera etapa: Streamlit escucha en `0.0.0.0:8510` (red interna `http://192.168.1.58:8510`, Tailscale `http://100.126.85.99:8510`, como los otros tableros) y además está publicado con HTTPS por `tailscale serve`. Por HTTP las claves viajan sin cifrar en la red interna: para solo-HTTPS, `BIND=127.0.0.1` al correr el instalador.
 Cloudflare Tunnel + Access (vendedores desde el celular) queda para después: ver el doc 09 del proyecto.
 
 ## Qué hay en esta carpeta
@@ -40,7 +40,7 @@ Si cambian objetivos o artículos (los Excel): correr los `cargar_*.py` en la Ma
 - Reiniciar: `sudo systemctl restart tablero-sigma` (obligatorio tras tocar `src/`).
 - El servidor está en UTC y no se cambia (otros tableros pueden depender de eso): el cron está escrito en UTC, 09:00 UTC = 06:00 Salta y 19:00 UTC = 16:00 Salta (Argentina no tiene horario de verano).
 - Backup: copiar `/opt/tableros-sigma/data/auth/usuarios.json` fuera de la VM de vez en cuando (solo hashes).
-- Permisos: `data/` 700, `.env` 600, usuario `tablero-sigma` sin sudo ni shell. No abrir el puerto 8510 hacia afuera.
+- Permisos: `data/` 700, `.env` 600, usuario `tablero-sigma` sin sudo ni shell. No abrir el puerto 8510 hacia Internet (solo red interna y Tailscale).
 
 ## Pendiente para la etapa 2
 Dominio `pejinakiscontrol.com`, Cloudflare Tunnel + Access, mínimo de clave 10 y lista de claves comunes, registro de auditoría (docs 08 y 09).
