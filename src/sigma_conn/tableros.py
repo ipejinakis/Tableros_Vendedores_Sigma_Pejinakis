@@ -297,6 +297,29 @@ def mis_ventas_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_
     return pd.DataFrame(filas)
 
 
+def ventas_sin_escala(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_vendedor: pd.DataFrame, corte: date,
+                      vendedor_ids) -> pd.DataFrame:
+    """Venta neta del mes hasta `corte` por vendedor (y por canal) para vendedores SIN escala de preventa.
+
+    Una fila por vendedor pedido (aunque no haya vendido): vendedor_id, vendedor, vendido y una columna por canal.
+    Misma base que la facturación (`ventas_para_objetivos`)."""
+    ids = [str(i) for i in vendedor_ids]
+    v = T.ventas_para_objetivos(ventas, dim_articulo)
+    v = v[pd.to_datetime(v["fecha"]) <= pd.Timestamp(corte)].copy()
+    v["vendedor_id"] = v["vendedor_id"].astype("string")
+    v = v[v["vendedor_id"].isin(ids)]
+    v["canal"] = v["origen"].map(canal_de_origen)
+    pc = v.pivot_table(index="vendedor_id", columns="canal", values="importe_neto", aggfunc="sum", fill_value=0.0) \
+        if not v.empty else pd.DataFrame()
+    nombres = (dim_vendedor.drop_duplicates("vendedor_id").assign(vendedor_id=lambda d: d["vendedor_id"].astype("string"))
+               .set_index("vendedor_id")["nombre"].to_dict()) if len(dim_vendedor) else {}
+    filas = []
+    for vid in ids:
+        r = {c: float(pc.loc[vid, c]) if (vid in pc.index and c in pc.columns) else 0.0 for c in CANALES}
+        filas.append({"vendedor_id": vid, "vendedor": nombres.get(vid, vid), "vendido": float(sum(r.values())), **r})
+    return pd.DataFrame(filas, columns=["vendedor_id", "vendedor", "vendido", *CANALES])
+
+
 # ----------------------------------------------------------------------------- Club Faro (Peñaflor)
 def tipo_cliente(rubro_cod) -> str:
     """AS (autoservicio) o TRAD (kioscos, maxikioscos, almacenes, etc.) según el rubro del cliente en SIGMA."""
@@ -318,6 +341,8 @@ def club_faro_compras(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_clie
     v = v.assign(articulo_id=v["articulo_id"].astype("string"), vendedor_id=v["vendedor_id"].astype("string"),
                  cliente_id=v["cliente_id"].astype("string"))
     v = v.merge(art, on="articulo_id", how="inner")
+    # mismo producto con dos códigos: se cuenta una sola vez (p. ej. 2040 = 1026)
+    v["articulo_id"] = v["articulo_id"].replace(N.CLUB_FARO_ARTICULO_EQUIVALENTE)
     rubro = dim_cliente.drop_duplicates("cliente_id").assign(cliente_id=lambda d: d["cliente_id"].astype("string")) \
         .set_index("cliente_id")["rubro_cod"]
     v["tipo_cliente"] = v["cliente_id"].map(rubro).map(tipo_cliente)
@@ -429,8 +454,9 @@ def titulares_resumen(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_clie
                 "estado_txt": ESTADO_CF_TXT[est]}
     lineas = pd.DataFrame([fila(i["nombre"], c.loc[c["linea"] == k, "cliente_id"].nunique(), i["objetivo"], linea=k)
                            for k, i in N.TITULARES_LINEAS.items()])
-    canales = pd.DataFrame([fila(k, c.loc[c["canal"] == k, "cliente_id"].nunique(), N.TITULARES_OBJ_CANAL[k]) for k in N.TITULARES_CANALES])
-    sub = [fila(k, c.loc[c["subcanal"] == k, "cliente_id"].nunique(), o) for k, o in N.TITULARES_OBJ_SUBCANAL.items()]
+    c_of = c[~c["linea"].isin(N.TITULARES_LINEAS_PROPIAS)]   # canales y subcanales: solo las líneas que pide Peñaflor (no "Elementos")
+    canales = pd.DataFrame([fila(k, c_of.loc[c_of["canal"] == k, "cliente_id"].nunique(), N.TITULARES_OBJ_CANAL[k]) for k in N.TITULARES_CANALES])
+    sub = [fila(k, c_of.loc[c_of["subcanal"] == k, "cliente_id"].nunique(), o) for k, o in N.TITULARES_OBJ_SUBCANAL.items()]
     return {"lineas": lineas, "canales": canales, "subcanales": pd.DataFrame(sub), "esperado_pct": esperado,
             "inicio": inicio, "fin": fin, "corte": corte}
 

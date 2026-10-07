@@ -85,9 +85,9 @@ def test_marca_de_proveedor():
     assert N.marca_de_proveedor("DEPOSITO SALTA") is None and N.marca_de_proveedor(None) is None
 
 
-def test_vendedores_con_perfil_tienen_supervisor_y_fili_va_con_mauro():
+def test_vendedores_con_perfil_tienen_supervisor_y_fili_va_con_costa():
     assert set(N.VENDEDOR_PERFIL) <= set(N.SUPERVISOR_VENDEDOR)
-    assert N.SUPERVISORES[N.SUPERVISOR_VENDEDOR["122"]] == "AMAYA MAURO"
+    assert N.SUPERVISORES[N.SUPERVISOR_VENDEDOR["122"]] == "COSTA SLA"
     assert N.VENDEDOR_PERFIL["100"] == N.VENDEDOR_PERFIL["119"] == "AASS"
     assert N.VENDEDOR_PERFIL["120"] == N.VENDEDOR_PERFIL["111"] == "INTERIOR"
 
@@ -102,7 +102,7 @@ def test_tablas_de_configuracion():
     assert len(f) == 9 and f.loc[(f.perfil == "AASS") & (f.escalon == 3), "premio"].item() == 600_000
     assert len(O.build_obj_mix_marca()) == 12
     vp = O.build_cfg_vendedor_perfil()
-    assert set(vp["vendedor_id"]) == set(N.VENDEDOR_PERFIL) and vp.loc[vp.vendedor_id == "122", "supervisor"].item() == "AMAYA MAURO"
+    assert set(vp["vendedor_id"]) == set(N.VENDEDOR_PERFIL) and vp.loc[vp.vendedor_id == "122", "supervisor"].item() == "COSTA SLA"
     assert len(O.build_cfg_supervisor_vendedor()) == len(N.SUPERVISOR_VENDEDOR)
 
 

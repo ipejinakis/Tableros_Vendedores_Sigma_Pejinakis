@@ -1,0 +1,23 @@
+[Unit]
+Description=Tableros SIGMA Pejinakis (Streamlit)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=@SVC_USER@
+Group=@SVC_USER@
+WorkingDirectory=@APP_DIR@
+ExecStart=@APP_DIR@/venv/bin/streamlit run dashboards/app.py \
+  --server.address 127.0.0.1 --server.port @PUERTO@ \
+  --server.headless true --browser.gatherUsageStats false
+Restart=always
+RestartSec=5
+# Endurecimiento básico
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=@APP_DIR@/data
+
+[Install]
+WantedBy=multi-user.target

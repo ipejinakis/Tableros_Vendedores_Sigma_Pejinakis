@@ -46,7 +46,7 @@ def cargar(data_dir: str, fmt: str, desde: date, hasta: date):
     ventas = TB.cargar_ventas_rango(store, desde, hasta)
     tablas = {}
     for nombre in ("dim_articulo", "dim_vendedor", "dim_cliente", "obj_cobertura", "obj_mis_ventas", "cfg_campana_articulo",
-                   "obj_club_faro", "cfg_club_faro_articulo"):
+                   "obj_club_faro", "cfg_club_faro_articulo", "cfg_11_titulares_articulo"):
         try:
             tablas[nombre] = store.read_table(nombre)
         except FileNotFoundError:
@@ -146,7 +146,9 @@ st.caption("La barra es lo que vendiste (color = tu estado); las marcas grises E
 
 _obj_cf = tablas["obj_club_faro"]
 _tiene_cf = _obj_cf is not None and not _obj_cf[_obj_cf["vendedor_id"].astype(str) == VID].empty
-_nombres_tabs = ["Mi ritmo", "Mi cobertura", "Mis campañas"] + (["Club Faro"] if _tiene_cf else []) + ["Mis canales"]
+_tiene_11t = tablas["cfg_11_titulares_articulo"] is not None and tablas["dim_cliente"] is not None
+_nombres_tabs = (["Mi ritmo", "Mi cobertura", "Mis campañas"] + (["Club Faro"] if _tiene_cf else [])
+                 + (["11 Titulares"] if _tiene_11t else []) + ["Mis canales"])
 _tabs = dict(zip(_nombres_tabs, st.tabs(_nombres_tabs)))
 tab_ritmo, tab_cob, tab_mv, tab_canal = _tabs["Mi ritmo"], _tabs["Mi cobertura"], _tabs["Mis campañas"], _tabs["Mis canales"]
 
@@ -271,6 +273,52 @@ if _tiene_cf:
                          column_config={"Objetivo": st.column_config.NumberColumn(format="%.0f"),
                                         "Faltan": st.column_config.NumberColumn(format="%.0f"),
                                         "Avance (%)": st.column_config.NumberColumn(format="%.0f%%")})
+
+# ----------------------------------------------------------------------------- 11 Titulares
+if _tiene_11t:
+    with _tabs["11 Titulares"]:
+        cfg_t, dim_cli_t = tablas["cfg_11_titulares_articulo"], tablas["dim_cliente"]
+        ventas_b = ventas[(pd.to_datetime(ventas["fecha"]) >= pd.Timestamp(inicio_b)) & (pd.to_datetime(ventas["fecha"]) <= pd.Timestamp(fin_b))]
+        rt = TB.titulares_resumen(ventas_b, dim_art, dim_cli_t, cfg_t, inicio_b, fin_b, corte)
+        # Tu aporte: clientes tuyos que califican en cada línea (misma regla, solo con tus ventas)
+        mis_cc = TB.titulares_compras(ventas_b[ventas_b["vendedor_id"].astype(str) == VID], dim_art, dim_cli_t, cfg_t, inicio_b, corte)
+        aporte = mis_cc.groupby("linea")["cliente_id"].nunique()
+        if int((cfg_t["fuente"] == "por defecto (S)").sum()):
+            st.warning("Resultados provisorios: todavía no están confirmados los artículos de cada línea.")
+        st.write(f"11 Titulares (Peñaflor) del bimestre {inicio_b:%d/%m} – {fin_b:%d/%m/%Y}. **El objetivo es de toda la distribuidora**: "
+                 f"entre todos tenemos que llegar a cada número. Avance esperado a hoy: **{rt['esperado_pct'] * 100:.0f}%**.")
+        st.caption("Un cliente cuenta en una línea si compró, en un mismo artículo de la línea, 1 caja cerrada (autoservicios y OP & VTK) "
+                   "o 3 unidades iguales (tradicionales).")
+        lin = rt["lineas"]
+        d = lin.assign(avance_pct=lin["avance"].clip(upper=1.5),
+                       etiqueta=lin["estado_txt"].str[0] + " " + lin["logrado"].astype(str) + " / " + lin["objetivo"].map("{:.0f}".format),
+                       avance_txt=(lin["avance"] * 100).map("{:.0f}%".format), faltan_txt=lin["faltan"].map("{:.0f}".format),
+                       esperado_txt=lin["esperado_valor"].map("{:.0f}".format), esperado_pct=rt["esperado_pct"])
+        orden = list(d["nombre"])
+        y = alt.Y("nombre:N", sort=orden, title=None, axis=alt.Axis(labelOverlap=False, labelLimit=220))
+        x = alt.X("avance_pct:Q", scale=alt.Scale(domain=[0, 1.7]),
+                  axis=alt.Axis(format="%", values=[0, 0.5, 1.0, 1.5], title="Avance de la distribuidora sobre el objetivo"))
+        col = alt.Color("estado_txt:N", title="Estado", sort=list(TB.ESTADO_CF_TXT.values()),
+                        scale=alt.Scale(domain=list(TB.ESTADO_CF_TXT.values()), range=[TB.ESTADO_COLOR[e] for e in TB.ESTADO_CF_TXT]),
+                        legend=alt.Legend(orient="top"))
+        tips = [alt.Tooltip("nombre:N", title="Línea"), alt.Tooltip("etiqueta:N", title="Logrado / objetivo"),
+                alt.Tooltip("avance_txt:N", title="Avance"), alt.Tooltip("esperado_txt:N", title="Esperado a hoy"),
+                alt.Tooltip("faltan_txt:N", title="Faltan"), alt.Tooltip("estado_txt:N", title="Estado")]
+        b = alt.Chart(d).mark_bar(size=16, cornerRadiusEnd=4).encode(y=y, x=x, color=col, tooltip=tips)
+        t = alt.Chart(d).mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=y, x=x, text="etiqueta:N")
+        e = alt.Chart(d).mark_tick(color=GRIS_MARCA, thickness=2, size=20).encode(y=y, x=alt.X("esperado_pct:Q"))
+        st.altair_chart(alt.layer(b, t, e).properties(height=alt.Step(36)), use_container_width=True)
+        st.caption("La barra es el avance de toda la distribuidora; la marca gris es lo que debería llevar a hoy. "
+                   "✔ en ritmo · ▲ algo atrasado (80 % a 100 % de lo esperado) · ✖ atrasado.")
+        tabla_v = pd.DataFrame({"Línea": lin["nombre"], "Tus clientes con compra": lin["linea"].map(aporte).fillna(0).astype(int),
+                                "Distribuidora": lin["logrado"], "Objetivo de la distribuidora": lin["objetivo"],
+                                "Faltan (distribuidora)": lin["faltan"], "Estado": lin["estado_txt"]})
+        st.markdown("**Tu aporte por línea**")
+        st.dataframe(tabla_v, hide_index=True,
+                     column_config={"Objetivo de la distribuidora": st.column_config.NumberColumn(format="%.0f"),
+                                    "Faltan (distribuidora)": st.column_config.NumberColumn(format="%.0f")})
+        texto_grande(f"🎯 Entre tus clientes ya tenés <b>{int(tabla_v['Tus clientes con compra'].sum())}</b> compras que cuentan "
+                     "(un cliente suma una vez por cada línea en la que califica).")
 
 # ----------------------------------------------------------------------------- canales
 with tab_canal:

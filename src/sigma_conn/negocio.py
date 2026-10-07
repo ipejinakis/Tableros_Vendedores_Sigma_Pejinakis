@@ -46,12 +46,17 @@ def marca_de_proveedor(proveedor) -> str | None:
 
 
 # ----------------------------------------------------------------------------- supervisores
-# El supervisor de los tableros sale de acá, NO de SIGMA (Fili/122 va con Mauro Amaya).
-SUPERVISORES: dict[str, str] = {"5": "AMAYA MAURO", "3": "BULDURINI NATALIA"}
+# El supervisor de los tableros sale de acá; coincide con SIGMA (Fili/122 va con COSTA SLA, decisión de Juan 2026-10-07).
+SUPERVISORES: dict[str, str] = {"5": "AMAYA MAURO", "3": "BULDURINI NATALIA", "7": "COSTA SLA"}
 SUPERVISOR_VENDEDOR: dict[str, str] = {
-    **{v: "5" for v in ("100", "101", "103", "105", "107", "115", "120", "122")},
+    **{v: "5" for v in ("100", "101", "103", "105", "107", "115", "120")},
+    "122": "7",
     **{v: "3" for v in ("102", "110", "111", "114", "117", "119")},
 }
+
+# Supervisores de SIGMA cuyos vendedores NO tienen escala de preventa: solo se muestran a los gerentes, como venta sin escalones
+# (Juan, 2026-10-07: GERENCIA SLA = 124 GERENCIA SALTA y 125 WILLY JESUS-SALTA).
+SUPERVISOR_SIN_ESCALA: dict[str, tuple[str, ...]] = {"GERENCIA SLA": ("124", "125")}
 
 # ----------------------------------------------------------------------------- cobertura Unilever
 CATEGORIAS_COBERTURA = ("BPC", "FOOD", "HC")
@@ -86,6 +91,10 @@ CLUB_FARO_LINEAS = {
     "BLANCOS_DULCES": {"nombre": "AS · Blancos dulces (cada SKU suma 1)", "tipo_cliente": "AS", "modo": "cliente_sku"},
     "FRIZZE": {"nombre": "AS · Familia Frizze", "tipo_cliente": "AS", "modo": "clientes"},
 }
+
+# Códigos que son el MISMO producto (se cambió el código y quedaron ventas residuales del viejo): cuentan como uno solo.
+# Clave = código viejo, valor = código que queda. Confirmado por Juan 2026-10-07: 2040 (desactivado) = 1026 (Elementos Torrontes dulce).
+CLUB_FARO_ARTICULO_EQUIVALENTE = {"2040": "1026"}
 
 
 def club_faro_linea(texto) -> str:
@@ -130,7 +139,10 @@ TITULARES_LINEAS = {
     "ANTARES": {"nombre": "Antares", "objetivo": 73},
     "SMIRNOFF_ICE": {"nombre": "Smirnoff Ice", "objetivo": 251},
     "GORDONS_FLAVOURS": {"nombre": "Gordons Flavours", "objetivo": 44},
+    # Parámetro PROPIO de Pejinakis (no lo pide Peñaflor; Juan, 2026-10-07): objetivo 0 por ahora y no entra en los canales.
+    "ELEMENTOS": {"nombre": "Elementos", "objetivo": 0, "propia": True},
 }
+TITULARES_LINEAS_PROPIAS = tuple(k for k, i in TITULARES_LINEAS.items() if i.get("propia"))
 # Canales por rubro del cliente en SIGMA (columna "Comercio" del listado de clientes). AS = RUBROS_AS; OP & VTK = los de
 # abajo; el resto es Tradicionales. Catering no tiene rubro en la base (queda en 0).
 TITULARES_CANALES = ("Autoservicios", "Tradicionales", "OP & VTK")

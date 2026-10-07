@@ -1,0 +1,5 @@
+# /etc/cron.d/tableros: ETL de SIGMA. La hora es la del servidor (zona America/Argentina/Salta).
+# 06:00 ETL completo (dimensiones + ventana móvil); 16:00 solo ventas. El ETL tiene su propio candado (.etl.lock).
+SHELL=/bin/bash
+0 6  * * * @SVC_USER@ cd @APP_DIR@ && venv/bin/python scripts/etl/run_etl.py >> /var/log/tableros/etl.log 2>&1
+0 16 * * * @SVC_USER@ cd @APP_DIR@ && venv/bin/python scripts/etl/run_etl.py --solo ventas >> /var/log/tableros/etl.log 2>&1

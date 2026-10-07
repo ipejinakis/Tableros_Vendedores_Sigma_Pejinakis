@@ -329,6 +329,14 @@ def test_club_faro_compras_reglas():
     assert sorted(c101.loc[c101.linea == "FRIZZE", "cliente_id"].unique()) == ["a3"]
 
 
+def test_club_faro_articulos_equivalentes_cuentan_una_vez(monkeypatch):
+    ventas, art, clientes, cfg = _club_faro_datos()
+    monkeypatch.setattr(N, "CLUB_FARO_ARTICULO_EQUIVALENTE", {"BD2": "BD1"})   # BD2 = mismo producto que BD1
+    c = TB.club_faro_compras(ventas, art, clientes, cfg, date(2026, 9, 1), date(2026, 9, 20))
+    bd = c[(c["vendedor_id"] == "101") & (c.linea == "BLANCOS_DULCES")]
+    assert len(bd) == 2 and sorted(bd["cliente_id"]) == ["a1", "a2"]            # a1 compró BD1 y BD2: suma 1, no 2
+
+
 def test_club_faro_vendedores_avance_y_faltante():
     ventas, art, clientes, cfg = _club_faro_datos()
     tabla, res = TB.club_faro_vendedores(ventas, art, clientes, VEND, cfg, _obj_club_faro(),
@@ -394,7 +402,7 @@ def test_titulares_compras_reglas_por_canal():
 def test_titulares_resumen_lineas_canales_y_subcanales():
     ventas, art, clientes, cfg = _titulares_datos()
     r = TB.titulares_resumen(ventas, art, clientes, cfg, date(2026, 9, 1), date(2026, 10, 31), date(2026, 9, 20))
-    assert len(r["lineas"]) == 11
+    assert len(r["lineas"]) == 12 and r["lineas"].set_index("linea").loc["ELEMENTOS", "estado"] == "sin_objetivo"
     assert r["lineas"].set_index("linea").loc["ALMA_MORA", "logrado"] == 4
     assert r["lineas"].set_index("linea").loc["ALMA_MORA", "objetivo"] == 351
     can = r["canales"].set_index("nombre")
@@ -404,7 +412,28 @@ def test_titulares_resumen_lineas_canales_y_subcanales():
     assert sub.loc["Catering", "estado"] == "sin_objetivo" and sub.loc["On Premise", "avance"] == 0.0
 
 
+def test_titulares_elementos_es_linea_propia_y_no_suma_a_los_canales():
+    ventas, art, clientes, cfg = _titulares_datos()
+    art = pd.concat([art, pd.DataFrame({"articulo_id": ["EL1"], "proveedor": [PEN], "division": [None], "unidades_por_bulto": [6]})])
+    cfg = pd.concat([cfg, pd.DataFrame({"linea": ["ELEMENTOS"], "articulo_id": ["EL1"], "incluir": [True]})], ignore_index=True)
+    r_ = av(99, "EL1", 6, 1000, vend="101", fecha="2026-09-10", tipo="F")
+    r_["clienteId"] = "as2"                                        # as2 (autoservicio) compra 1 caja (6 u) de EL1; en las otras líneas no califica
+    ventas = pd.concat([ventas, T.build_fact_ventas([r_], [fa(r_["id"], tipo="F", fecha=r_["fecha"], vend=r_["vendedor"])])], ignore_index=True)
+    r = TB.titulares_resumen(ventas, art, clientes, cfg, date(2026, 9, 1), date(2026, 10, 31), date(2026, 9, 20))
+    assert r["lineas"].set_index("linea").loc["ELEMENTOS", "logrado"] == 1
+    base = TB.titulares_resumen(*_titulares_datos()[:3], _titulares_datos()[3], date(2026, 9, 1), date(2026, 10, 31), date(2026, 9, 20))
+    assert list(r["canales"]["logrado"]) == list(base["canales"]["logrado"])   # los canales no cambian por Elementos
+
+
 def test_titulares_sin_ventas_no_rompe():
     ventas, art, clientes, cfg = _titulares_datos()
     r = TB.titulares_resumen(ventas.iloc[0:0], art, clientes, cfg, date(2026, 9, 1), date(2026, 10, 31), date(2026, 9, 20))
     assert (r["lineas"]["logrado"] == 0).all()
+
+
+def test_ventas_sin_escala_por_vendedor_y_canal():
+    ventas, art, clientes, cfg = _club_faro_datos()      # vendedores 101 (con ventas) y 100
+    t = TB.ventas_sin_escala(ventas, art, VEND, date(2026, 9, 20), ["100", "999"])
+    assert list(t["vendedor_id"]) == ["100", "999"]                  # una fila por vendedor pedido, aunque no haya vendido
+    assert t.loc[0, "vendido"] > 0 and t.loc[1, "vendido"] == 0
+    assert t.loc[0, "vendido"] == pytest.approx(t.loc[0, list(TB.CANALES)].sum())

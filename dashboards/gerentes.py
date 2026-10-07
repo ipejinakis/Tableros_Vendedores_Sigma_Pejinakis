@@ -146,7 +146,11 @@ sb.divider()
 
 tabla_total, resumen = TB.facturacion_vendedores(ventas, dim_art, dim_vend, corte)
 supervisores = sorted(s for s in tabla_total["supervisor"].unique() if s)
-sup_sel = sb.multiselect("Supervisor", supervisores, default=supervisores)
+# Supervisores sin escala de preventa (p. ej. GERENCIA SLA): solo los ven los gerentes, como venta sin escalones
+extra_sup = sorted(N.SUPERVISOR_SIN_ESCALA) if _sesion.get("rol") == "gerente" else []
+sup_todos = sb.multiselect("Supervisor", supervisores + extra_sup, default=supervisores)
+sup_sel = [s for s in sup_todos if s in supervisores]
+sup_extra_sel = [s for s in sup_todos if s in extra_sup]
 perfiles = [N.PERFIL_GENERAL, N.PERFIL_AASS, N.PERFIL_INTERIOR]
 perfil_sel = sb.multiselect("Perfil de escala", perfiles, default=perfiles)
 solo_con_venta = sb.checkbox("Ocultar vendedores sin ventas", value=False)
@@ -166,8 +170,26 @@ st.caption(
 if ultimo and corte > ultimo:
     st.warning(f"No hay ventas posteriores al {ultimo:%d/%m/%Y}: el corte es mayor que el último día con datos.")
 
+def mostrar_sin_escala():
+    """Venta de los vendedores de los supervisores sin escala (GERENCIA SLA) elegidos en el filtro: sin escalones ni premio."""
+    for sup in sup_extra_sel:
+        d = TB.ventas_sin_escala(ventas, dim_art, dim_vend, corte, N.SUPERVISOR_SIN_ESCALA[sup])
+        st.subheader(f"{sup}: venta sin escala")
+        st.caption(esc(f"Mes {mes} · corte {corte:%d/%m/%Y} · neto sin IVA, todos los canales. Sin escalones ni premio "
+                       f"(no tienen escala de preventa). Total: {TB.fmt_millones(d['vendido'].sum())}"))
+        st.dataframe(d.assign(**{"Venta neta (M$)": d["vendido"] / 1e6, "Axum (M$)": d["Axum"] / 1e6,
+                                 "Compre Ahora (M$)": d["Compre Ahora"] / 1e6, "Directa (M$)": d["Directa"] / 1e6,
+                                 "Otro (M$)": d["Otro"] / 1e6}).rename(columns={"vendedor_id": "Código", "vendedor": "Vendedor"})[
+            ["Código", "Vendedor", "Venta neta (M$)", "Axum (M$)", "Compre Ahora (M$)", "Directa (M$)", "Otro (M$)"]],
+            hide_index=True, column_config={c: st.column_config.NumberColumn(format="%.1f") for c in
+                                            ("Venta neta (M$)", "Axum (M$)", "Compre Ahora (M$)", "Directa (M$)", "Otro (M$)")})
+
+
 if tabla.empty:
-    st.info("No hay vendedores con esos filtros.")
+    if sup_extra_sel:
+        mostrar_sin_escala()
+    else:
+        st.info("No hay vendedores con esos filtros.")
     st.stop()
 
 ne = tabla["estado"].value_counts()
@@ -260,6 +282,7 @@ with tab_fact:
                          .rename(columns={"vendedor_id": "Código", "vendedor": "Vendedor"}), hide_index=True,
                          column_config={"Venta neta (M$)": st.column_config.NumberColumn(format="%.1f")})
         st.caption(esc(f"Total empresa (con y sin escala): {TB.fmt_millones(resumen['total_empresa'])}"))
+    mostrar_sin_escala()
 
 # ----------------------------------------------------------------------------- pestaña ritmo
 with tab_ritmo:
@@ -583,7 +606,13 @@ with tab_canal:
     canales = pd.DataFrame({
         "Vendedor": tabla["vendedor"], "Axum (M$)": tabla["Axum"] / 1e6, "Compre Ahora (M$)": tabla["Compre Ahora"] / 1e6,
         "Directa (M$)": tabla["Directa"] / 1e6, "Total (M$)": tabla["vendido"] / 1e6,
-    }).sort_values("Total (M$)", ascending=False)
+    })
+    for sup in sup_extra_sel:       # vendedores sin escala de los supervisores elegidos (p. ej. GERENCIA SLA): solo gerentes
+        d = TB.ventas_sin_escala(ventas, dim_art, dim_vend, corte, N.SUPERVISOR_SIN_ESCALA[sup])
+        canales = pd.concat([canales, pd.DataFrame({
+            "Vendedor": d["vendedor"] + " (sin escala)", "Axum (M$)": d["Axum"] / 1e6, "Compre Ahora (M$)": d["Compre Ahora"] / 1e6,
+            "Directa (M$)": d["Directa"] / 1e6, "Total (M$)": d["vendido"] / 1e6})], ignore_index=True)
+    canales = canales.sort_values("Total (M$)", ascending=False)
     st.dataframe(canales, hide_index=True, column_config={c: st.column_config.NumberColumn(format="%.1f")
                                                          for c in canales.columns if c != "Vendedor"})
 
