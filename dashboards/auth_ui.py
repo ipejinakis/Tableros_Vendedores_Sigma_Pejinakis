@@ -113,6 +113,11 @@ def requerir_login() -> dict:
         sesion = _sesiones(store).validar(token)
         if sesion:
             st.session_state["usuario"], st.session_state["_token"] = sesion, token
+    if sesion and store.sesion_de(sesion["usuario"]) is None:      # la cuenta se dio de baja con la sesión abierta: se cierra
+        st.session_state.clear()
+        st.session_state["_cookie_accion"] = ("borrar", "")
+        sesion = None
+        st.rerun()
     if sesion:
         if sesion.get("debe_cambiar"):
             mostrar_logo(240)

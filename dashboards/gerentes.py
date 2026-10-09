@@ -214,8 +214,8 @@ s1.metric(TB.ESTADO_TXT["verde"], int(ne.get("verde", 0)), help="Ya alcanzaron a
 s2.metric(TB.ESTADO_TXT["amarillo"], int(ne.get("amarillo", 0)), help="Todavía no lo alcanzaron, pero al ritmo actual llegan al escalón 1.")
 s3.metric(TB.ESTADO_TXT["rojo"], int(ne.get("rojo", 0)), help="Al ritmo actual no llegan al escalón 1.")
 
-tab_fact, tab_ritmo, tab_cob, tab_mv, tab_cf, tab_11t, tab_canal, tab_escalas = st.tabs(
-    ["Facturación", "Ritmo", "Cobertura", "Mis Ventas", "Club Faro", "11 Titulares", "Por canal", "Escalas y premios"])
+tab_fact, tab_ritmo, tab_cob, tab_mv, tab_cf, tab_11t, tab_canal, tab_escalas, tab_usr = st.tabs(
+    ["Facturación", "Ritmo", "Cobertura", "Mis Ventas", "Club Faro", "11 Titulares", "Por canal", "Escalas y premios", "Usuarios"])
 
 # ----------------------------------------------------------------------------- pestaña facturación
 with tab_fact:
@@ -629,3 +629,10 @@ with tab_escalas:
         f"escalón {i}: {TB.fmt_pesos(p)}" for i, p in enumerate(N.PREMIOS_ESCALON, start=1))) + ".")
     st.caption("Escalas de venta neta mensual sin IVA por vendedor, vigentes para septiembre y octubre de 2026. "
                "El objetivo diario es el mensual dividido 26 (se vende de lunes a sábado).")
+
+# ----------------------------------------------------------------------------- pestaña usuarios (alta, baja y clave de vendedores)
+with tab_usr:
+    import usuarios_ui
+    _nombres_sigma = ({str(r.vendedor_id): str(r.nombre).title() for r in dim_vend.drop_duplicates("vendedor_id").itertuples()}
+                      if len(dim_vend) else {})
+    usuarios_ui.panel_usuarios(_sesion, _nombres_sigma)

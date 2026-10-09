@@ -54,6 +54,7 @@ def main() -> None:
     ag.add_argument("--rol", required=True, choices=A.ROLES)
     ag.add_argument("--nombre", required=True)
     ag.add_argument("--vendedor-id")
+    ag.add_argument("--supervisor-id", help="código de supervisor de SIGMA (solo rol supervisor): define qué equipo gestiona")
     for nombre in ("resetear", "desactivar", "activar"):
         sub.add_parser(nombre).add_argument("usuario")
     sub.add_parser("listar")
@@ -75,7 +76,7 @@ def main() -> None:
             mostrar(creados)
             print("Faltan los gerentes: agregar cada uno con 'agregar --rol gerente'.")
         elif a.cmd == "agregar":
-            clave = st.crear(a.usuario, a.rol, a.nombre, vendedor_id=a.vendedor_id)
+            clave = st.crear(a.usuario, a.rol, a.nombre, vendedor_id=a.vendedor_id, supervisor_id=a.supervisor_id)
             mostrar([(A.normalizar_usuario(a.usuario), a.rol, a.nombre, clave)])
         elif a.cmd == "resetear":
             mostrar([(A.normalizar_usuario(a.usuario), "", "(clave nueva)", st.resetear(a.usuario))])

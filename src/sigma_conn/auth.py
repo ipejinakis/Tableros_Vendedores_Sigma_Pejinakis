@@ -134,7 +134,7 @@ class UsuariosStore:
 
     # --- altas y cambios
     def crear(self, usuario: str, rol: str, nombre: str, vendedor_id: str | None = None,
-              clave: str | None = None) -> str:
+              clave: str | None = None, supervisor_id: str | None = None) -> str:
         """Crea un usuario con clave temporal (o la dada) y devuelve esa clave en claro. Debe cambiarla al entrar."""
         usuario = normalizar_usuario(usuario)
         if not usuario or not usuario.replace(".", "").replace("_", "").isalnum():
@@ -156,6 +156,8 @@ class UsuariosStore:
         datos[usuario] = {"rol": rol, "nombre": nombre.strip(), "vendedor_id": vendedor_id, "hash": hash_clave(clave),
                           "debe_cambiar": True, "activo": True,
                           "creado": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        if rol == ROL_SUPERVISOR and supervisor_id:
+            datos[usuario]["supervisor_id"] = str(supervisor_id)
         self._guardar(datos)
         return clave
 
@@ -189,6 +191,60 @@ class UsuariosStore:
         datos[usuario]["activo"] = activo
         self._guardar(datos)
 
+    # --- gestión de cuentas de vendedores por gerentes y supervisores (la autorización se valida acá, no solo en la pantalla)
+    def _vendedor_gestionable(self, actor: dict | None, vendedor_id: str) -> str:
+        vid = str(vendedor_id).strip()
+        if vid not in vendedores_gestionables(actor):
+            raise AuthError("No tenés permiso para gestionar la cuenta de ese vendedor.")
+        return vid
+
+    def estado_vendedores(self, actor: dict | None) -> list[dict]:
+        """Una fila por vendedor que `actor` puede gestionar: código, nombre, si tiene cuenta, si está activa y si tiene la clave pendiente."""
+        datos = self._leer()
+        filas = []
+        for vid in vendedores_gestionables(actor):
+            d = datos.get(vid)
+            filas.append({"vendedor_id": vid, "nombre": d["nombre"] if d else "", "existe": d is not None,
+                          "activo": bool(d) and d.get("activo", True), "debe_cambiar": bool(d) and bool(d.get("debe_cambiar"))})
+        return filas
+
+    def alta_vendedor(self, actor: dict | None, vendedor_id: str, nombre: str) -> str:
+        """Alta: crea la cuenta del código, o reactiva una dada de baja (nuevo nombre y clave temporal). Devuelve la clave temporal."""
+        vid = self._vendedor_gestionable(actor, vendedor_id)
+        nombre = " ".join(str(nombre).split())
+        if not nombre:
+            raise AuthError("Escribí el nombre del vendedor.")
+        datos = self._leer()
+        d = datos.get(vid)
+        if d is None:
+            return self.crear(vid, ROL_VENDEDOR, nombre, vendedor_id=vid)
+        if d.get("rol") != ROL_VENDEDOR:
+            raise AuthError("Ese usuario no es una cuenta de vendedor.")
+        if d.get("activo", True):
+            raise AuthError("La cuenta ya está activa.")
+        clave = generar_clave()
+        d.update({"nombre": nombre, "hash": hash_clave(clave), "debe_cambiar": True, "activo": True})
+        self._guardar(datos)
+        return clave
+
+    def baja_vendedor(self, actor: dict | None, vendedor_id: str) -> None:
+        """Baja lógica: la cuenta queda guardada pero no puede ingresar (las sesiones abiertas dejan de valer)."""
+        vid = self._vendedor_gestionable(actor, vendedor_id)
+        d = self._leer().get(vid)
+        if d is None or d.get("rol") != ROL_VENDEDOR:
+            raise AuthError("Ese vendedor no tiene cuenta.")
+        self.desactivar(vid, activo=False)
+
+    def resetear_vendedor(self, actor: dict | None, vendedor_id: str) -> str:
+        """Clave temporal nueva para una cuenta activa (obliga a cambiarla al entrar). Devuelve la clave."""
+        vid = self._vendedor_gestionable(actor, vendedor_id)
+        d = self._leer().get(vid)
+        if d is None or d.get("rol") != ROL_VENDEDOR:
+            raise AuthError("Ese vendedor no tiene cuenta.")
+        if not d.get("activo", True):
+            raise AuthError("La cuenta está dada de baja: para reactivarla usá el alta.")
+        return self.resetear(vid)
+
     # --- ingreso
     def autenticar(self, usuario: str, clave: str) -> dict | None:
         """Datos de sesión (sin hash) si usuario y clave son correctos y el usuario está activo; si no, None."""
@@ -211,7 +267,7 @@ class UsuariosStore:
 
 def _datos_sesion(usuario: str, d: dict) -> dict:
     return {"usuario": usuario, "rol": d["rol"], "nombre": d["nombre"], "vendedor_id": d.get("vendedor_id"),
-            "debe_cambiar": bool(d.get("debe_cambiar"))}
+            "supervisor_id": d.get("supervisor_id"), "debe_cambiar": bool(d.get("debe_cambiar"))}
 
 
 def huella_clave(hash_guardado: str) -> str:
@@ -221,6 +277,20 @@ def huella_clave(hash_guardado: str) -> str:
 
 def ve_todo(sesion: dict | None) -> bool:
     return bool(sesion) and sesion.get("rol") in ROLES_VEN_TODO
+
+
+def vendedores_gestionables(sesion: dict | None) -> list[str]:
+    """Códigos de vendedor cuyas cuentas puede administrar esa sesión: el gerente, todos; el supervisor, solo los de su equipo; el vendedor, ninguno."""
+    if not sesion:
+        return []
+    if sesion.get("rol") == ROL_GERENTE:
+        return sorted(N.VENDEDOR_PERFIL)
+    if sesion.get("rol") == ROL_SUPERVISOR:
+        sup = sesion.get("supervisor_id") or N.SUPERVISOR_DE_USUARIO.get(normalizar_usuario(sesion.get("usuario", "")))
+        if not sup:
+            return []
+        return sorted(v for v in N.VENDEDOR_PERFIL if N.SUPERVISOR_VENDEDOR.get(v) == str(sup))
+    return []
 
 
 # ----------------------------------------------------------------------------- sesiones que sobreviven a la recarga

@@ -54,6 +54,10 @@ SUPERVISOR_VENDEDOR: dict[str, str] = {
     **{v: "3" for v in ("102", "110", "111", "114", "117", "119")},
 }
 
+# Usuario del tablero de cada supervisor -> código de supervisor de SIGMA: define qué cuentas de vendedores puede gestionar
+# (solo las de su equipo, `SUPERVISOR_VENDEDOR`; Juan, 2026-10-09). Un supervisor sin entrada acá (ni `supervisor_id` en su usuario) no gestiona ninguna.
+SUPERVISOR_DE_USUARIO: dict[str, str] = {"mamaya": "5", "nbuldurini": "3"}
+
 # Supervisores que solo ve el rol gerente (Juan, 2026-10-09): para los supervisores no aparecen en el filtro ni en ninguna pestaña.
 SUPERVISORES_SOLO_GERENCIA: tuple[str, ...] = ("COSTA SLA",)
 

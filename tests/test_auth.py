@@ -218,3 +218,81 @@ def test_sesiones_solo_guardan_hash_del_token_y_el_archivo_es_privado(tmp_path):
         assert stat.S_IMODE(ses.ruta.stat().st_mode) == 0o600
     ses.revocar_usuario("gerencia")
     assert ses.validar(token) is None
+
+
+# ----------------------------------------------------------------------------- gestión de cuentas de vendedores
+def _actor(rol, usuario="x", **extra):
+    return {"usuario": usuario, "rol": rol, "nombre": usuario, "vendedor_id": None, **extra}
+
+
+def test_vendedores_gestionables_segun_rol():
+    from sigma_conn import negocio as N
+    assert A.vendedores_gestionables(_actor(A.ROL_GERENTE)) == sorted(N.VENDEDOR_PERFIL)
+    amaya = A.vendedores_gestionables(_actor(A.ROL_SUPERVISOR, "mamaya"))
+    assert amaya == ["100", "101", "103", "105", "107", "115", "120"]
+    assert A.vendedores_gestionables(_actor(A.ROL_SUPERVISOR, "nbuldurini")) == ["102", "110", "111", "114", "117", "119"]
+    assert A.vendedores_gestionables(_actor(A.ROL_SUPERVISOR, "otro")) == []                     # supervisor sin equipo asignado
+    assert A.vendedores_gestionables(_actor(A.ROL_SUPERVISOR, "costa", supervisor_id="7")) == ["122"]
+    assert A.vendedores_gestionables(_actor(A.ROL_VENDEDOR, "101")) == [] and A.vendedores_gestionables(None) == []
+
+
+def test_supervisor_gestiona_solo_su_equipo(tmp_path):
+    s = _store(tmp_path)
+    s.crear("102", A.ROL_VENDEDOR, "Vendedor 102", vendedor_id="102")      # equipo de Buldurini
+    amaya = _actor(A.ROL_SUPERVISOR, "mamaya")
+    with pytest.raises(A.AuthError):
+        s.resetear_vendedor(amaya, "102")
+    with pytest.raises(A.AuthError):
+        s.baja_vendedor(amaya, "102")
+    with pytest.raises(A.AuthError):
+        s.alta_vendedor(amaya, "102", "Nuevo")
+    assert s.autenticar("102", "mal") is None and s._leer()["102"]["activo"] is True      # nada cambió
+    assert [f["vendedor_id"] for f in s.estado_vendedores(amaya)] == A.vendedores_gestionables(amaya)
+    for no_puede in (_actor(A.ROL_VENDEDOR, "101"), None):
+        with pytest.raises(A.AuthError):
+            s.resetear_vendedor(no_puede, "102")
+
+
+def test_alta_baja_reactivacion_y_reseteo_de_vendedor(tmp_path):
+    s = _store(tmp_path)
+    ger = _actor(A.ROL_GERENTE, "gerencialv")
+    # alta: cuenta nueva con clave temporal que obliga a cambiarla
+    clave = s.alta_vendedor(ger, "110", "  Ana   Pérez ")
+    assert s.autenticar("110", clave)["debe_cambiar"] is True and s._leer()["110"]["nombre"] == "Ana Pérez"
+    with pytest.raises(A.AuthError):
+        s.alta_vendedor(ger, "110", "Otra")                                  # ya está activa
+    with pytest.raises(A.AuthError):
+        s.alta_vendedor(ger, "110", "   ")                                   # sin nombre
+    with pytest.raises(A.AuthError):
+        s.alta_vendedor(ger, "999", "Nadie")                                 # código sin escala de preventa
+    # reseteo: la clave vieja deja de servir
+    nueva = s.resetear_vendedor(ger, "110")
+    assert nueva != clave and s.autenticar("110", clave) is None and s.autenticar("110", nueva)
+    # baja lógica: no entra, pero la cuenta se conserva
+    s.baja_vendedor(ger, "110")
+    assert s.autenticar("110", nueva) is None and "110" in {u["usuario"] for u in s.listar()}
+    with pytest.raises(A.AuthError):
+        s.resetear_vendedor(ger, "110")                                      # dada de baja: primero se reactiva
+    # reactivación: otra persona toma el código (nombre y clave nuevos; la clave anterior no sirve)
+    otra = s.alta_vendedor(ger, "110", "Luis Gómez")
+    ses = s.autenticar("110", otra)
+    assert ses and ses["nombre"] == "Luis Gómez" and ses["debe_cambiar"] is True and s.autenticar("110", nueva) is None
+    # baja de una cuenta que no existe
+    with pytest.raises(A.AuthError):
+        s.baja_vendedor(ger, "101")
+
+
+def test_baja_revoca_sesion_persistente_y_no_toca_otros_roles(tmp_path):
+    s = _store(tmp_path)
+    ger = _actor(A.ROL_GERENTE, "gerencialv")
+    clave = s.alta_vendedor(ger, "101", "Vendedor 101")
+    s.cambiar_clave("101", clave, "Clave-larga-77")
+    ses = A.SesionesStore(A.ruta_sesiones(s.ruta), s)
+    token = ses.crear("101")
+    assert ses.validar(token)
+    s.baja_vendedor(ger, "101")
+    assert ses.validar(token) is None
+    s.crear("mamaya", A.ROL_SUPERVISOR, "Mauro Amaya")
+    with pytest.raises(A.AuthError):
+        s.baja_vendedor(ger, "mamaya")                                       # solo cuentas de vendedores con escala
+    assert s._leer()["mamaya"]["activo"] is True
