@@ -23,6 +23,8 @@ from streamlit.errors import StreamlitAPIException  # noqa: E402
 
 from barras import capa_proyeccion, leyenda_avance, x_texto  # noqa: E402
 from estilo import esc, mostrar_logo  # noqa: E402
+from sigma_conn import config_bimestre as CB  # noqa: E402
+from sigma_conn import config_campanas as CS  # noqa: E402
 from sigma_conn import config_objetivos as CO  # noqa: E402
 from sigma_conn import negocio as N  # noqa: E402
 from sigma_conn import tableros as TB  # noqa: E402
@@ -67,6 +69,24 @@ def cargar_cobertura(data_dir: str, fmt: str, desde: date, hasta: date):
     except FileNotFoundError:
         obj = None
     return ventas, obj
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cargar_objetivos_base(data_dir: str, fmt: str):
+    """Tablas de objetivos tal como salieron del Excel (la semilla de lo que se edita en la pestaña Objetivos)."""
+    store = Store(Path(data_dir), fmt)
+    out = {}
+    for nombre, modulo in (("obj_cobertura", "cobertura"), ("obj_mis_ventas", "mis_ventas"), ("obj_club_faro", "club_faro")):
+        try:
+            out[modulo] = store.read_table(nombre)
+        except FileNotFoundError:
+            out[modulo] = None
+    for nombre in ("cfg_campana_articulo", "cfg_club_faro_articulo", "cfg_11_titulares_articulo"):
+        try:
+            out[nombre] = store.read_table(nombre)
+        except FileNotFoundError:
+            out[nombre] = None
+    return out
 
 
 @st.cache_data(ttl=300, show_spinner="Leyendo Mis Ventas…")
@@ -323,6 +343,7 @@ with tab_ritmo:
 # ----------------------------------------------------------------------------- pestaña cobertura
 with tab_cob:
     ini_b, fin_b = ini_bim, fin_bim
+    EXC_COB = CS.excepciones_cobertura(ini_b)         # artículos reasignados de categoría en la pestaña Objetivos
     try:
         ventas_b, obj_cob = cargar_cobertura(str(store.root), store.fmt, ini_b, fin_b)
     except FileNotFoundError as exc:
@@ -331,7 +352,8 @@ with tab_cob:
     if obj_cob is None and ventas_b is not None:
         st.info("Faltan los objetivos de cobertura. Correr: python scripts/etl/cargar_objetivos.py")
     elif obj_cob is not None:
-        tc_total, rc = TB.cobertura_vendedores(ventas_b, dim_art, dim_vend, obj_cob, ini_b, fin_b, corte_b)
+        obj_cob = CB.objetivos_vigentes("cobertura", ini_b, obj_cob)        # objetivos editados en la pestaña Objetivos (si los hay)
+        tc_total, rc = TB.cobertura_vendedores(ventas_b, dim_art, dim_vend, obj_cob, ini_b, fin_b, corte_b, EXC_COB)
         tc = tc_total[tc_total["vendedor_id"].isin(tabla["vendedor_id"])].copy()
         st.subheader("Cobertura: clientes con compra por categoría")
         st.caption(f"Bimestre {ini_b:%d/%m/%Y} – {fin_b:%d/%m/%Y} · corte {corte_b:%d/%m/%Y}. Un cliente cuenta una vez por categoría "
@@ -384,20 +406,27 @@ with tab_cob:
                                file_name=f"cobertura_{ini_b:%Y%m}_{corte_b:%Y%m%d}.csv", mime="text/csv")
         sin_asig = dim_art.loc[dim_art["categoria_cobertura"] == "COMBO_SIN_ASIGNAR", "articulo_id"].astype(str).tolist() \
             if "categoria_cobertura" in dim_art.columns else []
+        sin_asig = [a for a in sin_asig if a not in EXC_COB]      # los que ya se asignaron en la pestaña Objetivos no se avisan
         if sin_asig:
             st.warning("Hay combos sin categoría asignada (no suman a la cobertura): " + ", ".join(sin_asig) +
-                       ". Agregarlos a COMBO_CATEGORIA en transform.py.")
+                       ". Asignarles categoría en la pestaña Objetivos → Cobertura.")
         st.caption(TB.AYUDA_SEMAFORO_AVANCE)
 
 # ----------------------------------------------------------------------------- pestaña Mis Ventas
 with tab_mv:
     ini_m, fin_m = ini_bim, fin_bim
     obj_mv, cfg_camp, faltan_mv = cargar_mis_ventas(str(store.root), store.fmt)
+    nombres_camp = N.CAMPANA_NOMBRE
+    if not faltan_mv:          # campañas, artículos y objetivos del bimestre (los editados en la pestaña Objetivos o los del Excel)
+        obj_mv, cfg_camp, nombres_camp = CS.tablas_vigentes("mis_ventas", ini_m, obj_mv, cfg_camp)
     if faltan_mv:
         st.info("Faltan tablas: " + ", ".join(faltan_mv) + ". Correr scripts/etl/cargar_objetivos.py y scripts/etl/cargar_campanas.py")
+    elif obj_mv is None or obj_mv.empty:
+        st.info(f"El bimestre {ini_m:%d/%m/%Y} – {fin_m:%d/%m/%Y} todavía no tiene campañas de Mis Ventas cargadas. "
+                "Se arman en la pestaña Objetivos → Mis Ventas.")
     else:
         ventas_m, _ = cargar_cobertura(str(store.root), store.fmt, ini_m, fin_m)
-        mv = TB.mis_ventas_vendedores(ventas_m, dim_art, dim_vend, obj_mv, cfg_camp, ini_m, fin_m, corte_b)
+        mv = TB.mis_ventas_vendedores(ventas_m, dim_art, dim_vend, obj_mv, cfg_camp, ini_m, fin_m, corte_b, nombres_camp)
         mv = mv[mv["vendedor_id"].isin(tabla["vendedor_id"])].copy()
         st.subheader("Mis Ventas: campañas Unilever del bimestre")
         esp = TB.fraccion_esperada(ini_m, fin_m, corte_b)
@@ -458,11 +487,17 @@ with tab_mv:
 with tab_cf:
     ini_f, fin_f = ini_bim, fin_bim
     obj_cf, cfg_cf, dim_cli, faltan_cf = cargar_club_faro(str(store.root), store.fmt)
+    lineas_cf = N.CLUB_FARO_LINEAS
+    if not faltan_cf:
+        obj_cf, cfg_cf, lineas_cf = CS.tablas_vigentes("club_faro", ini_f, obj_cf, cfg_cf)
     if faltan_cf:
         st.info("Faltan tablas: " + ", ".join(faltan_cf) + ". Correr scripts/etl/cargar_club_faro.py (y el ETL completo para dim_cliente).")
+    elif not lineas_cf:
+        st.info(f"El bimestre {ini_f:%d/%m/%Y} – {fin_f:%d/%m/%Y} todavía no tiene líneas de Club Faro cargadas. "
+                "Se arman en la pestaña Objetivos → Club Faro.")
     else:
         ventas_f, _ = cargar_cobertura(str(store.root), store.fmt, ini_f, fin_f)
-        cf, rcf = TB.club_faro_vendedores(ventas_f, dim_art, dim_cli, dim_vend, cfg_cf, obj_cf, ini_f, fin_f, corte_b)
+        cf, rcf = TB.club_faro_vendedores(ventas_f, dim_art, dim_cli, dim_vend, cfg_cf, obj_cf, ini_f, fin_f, corte_b, lineas_cf)
         st.subheader("Club Faro (Peñaflor): clientes con compra por línea")
         st.caption(f"Bimestre {ini_f:%d/%m/%Y} – {fin_f:%d/%m/%Y} · corte {corte_b:%d/%m/%Y} · avance esperado a hoy: "
                    f"{rcf['esperado_pct'] * 100:.0f}% (por días de venta). Con comprar 1 unidad de un artículo de la línea el cliente "
@@ -481,8 +516,8 @@ with tab_cf:
                     for r in cf[cf["supuesto"]].drop_duplicates("vendedor_id").itertuples()) + ".")
             sin_obj = cf[cf["estado"] == "sin_objetivo"]
             cf = cf[cf["estado"] != "sin_objetivo"]     # en el gráfico y las tarjetas solo van los que tienen objetivo
-            k = st.columns(len(N.CLUB_FARO_LINEAS))
-            for col, (linea, info) in zip(k, N.CLUB_FARO_LINEAS.items()):
+            k = st.columns(len(lineas_cf))
+            for col, (linea, info) in zip(k, lineas_cf.items()):
                 d = rcf["por_linea"][linea]
                 col.metric(info["nombre"], f"{d['logrado']:,.0f} de {d['objetivo']:,.0f}".replace(",", "."),
                            help="Suma de todos los vendedores con objetivo en la línea.")
@@ -494,7 +529,7 @@ with tab_cf:
                 avance_pct=cf["avance"].clip(upper=1.5), avance_txt=(cf["avance"] * 100).map("{:.0f}%".format),
                 esperado_txt=cf["esperado_valor"].map("{:.0f}".format), faltan_txt=cf["faltan"].map("{:.0f}".format))
             orden_v = list(dict.fromkeys(cf.sort_values("vendedor")["vendedor"]))
-            orden_p = [info["nombre"] for info in N.CLUB_FARO_LINEAS.values()]
+            orden_p = [info["nombre"] for info in lineas_cf.values()]
             yv = alt.Y("vendedor:N", sort=orden_v, title=None)
             xv = alt.X("avance_pct:Q", scale=alt.Scale(domain=[0, 1.7]),
                        axis=alt.Axis(format="%", values=[0, 0.5, 1.0, 1.5], title="Avance sobre el objetivo"))
@@ -543,11 +578,17 @@ with tab_cf:
 with tab_11t:
     ini_t, fin_t = ini_bim, fin_bim
     cfg_t, dim_cli_t, faltan_t = cargar_titulares(str(store.root), store.fmt)
+    lineas_t = N.TITULARES_LINEAS
+    if not faltan_t:       # líneas, artículos y objetivos del bimestre (editados en la pestaña Objetivos o los del Excel)
+        cfg_t, lineas_t, obj_canal_t, obj_subcanal_t = CS.titulares_vigentes(ini_t, cfg_t)
     if faltan_t:
         st.info("Faltan tablas: " + ", ".join(faltan_t) + ". Correr scripts/etl/cargar_11_titulares.py (y el ETL completo para dim_cliente).")
+    elif not lineas_t:
+        st.info(f"El bimestre {ini_t:%d/%m/%Y} – {fin_t:%d/%m/%Y} todavía no tiene líneas de 11 Titulares cargadas. "
+                "Se arman en la pestaña Objetivos → 11 Titulares.")
     else:
         ventas_t, _ = cargar_cobertura(str(store.root), store.fmt, ini_t, fin_t)
-        rt = TB.titulares_resumen(ventas_t, dim_art, dim_cli_t, cfg_t, ini_t, fin_t, corte_b)
+        rt = TB.titulares_resumen(ventas_t, dim_art, dim_cli_t, cfg_t, ini_t, fin_t, corte_b, lineas_t, obj_canal_t, obj_subcanal_t)
         st.subheader("11 Titulares (Peñaflor): clientes con compra del distribuidor")
         st.caption(f"Período {ini_t:%d/%m/%Y} – {fin_t:%d/%m/%Y} · corte {corte_b:%d/%m/%Y} · avance esperado a hoy: "
                    f"{rt['esperado_pct'] * 100:.0f}% (por días de venta). Los objetivos son del distribuidor entero, no por vendedor. "
@@ -642,8 +683,26 @@ with tab_escalas:
 
 # ----------------------------------------------------------------------------- pestaña usuarios (alta, baja y clave de vendedores)
 with tab_obj:
+    import campanas_ui
+    import objetivos_bimestre_ui
     import objetivos_ui
-    objetivos_ui.panel_objetivos(_sesion, {str(r.vendedor_id): str(r.nombre).title() for r in dim_vend.drop_duplicates("vendedor_id").itertuples()} if len(dim_vend) else {})
+    _nombres_obj = ({str(r.vendedor_id): str(r.nombre).title() for r in dim_vend.drop_duplicates("vendedor_id").itertuples()}
+                    if len(dim_vend) else {})
+    _base_obj = cargar_objetivos_base(str(store.root), store.fmt)
+    _t_fact, _t_cob, _t_mv, _t_cf, _t_11 = st.tabs(["Facturación (mensual)", "Cobertura (bimestral)", "Mis Ventas (bimestral)",
+                                                    "Club Faro (bimestral)", "11 Titulares (bimestral)"])
+    with _t_fact:
+        objetivos_ui.panel_objetivos(_sesion, _nombres_obj)
+    with _t_cob:
+        objetivos_bimestre_ui.panel_modulo("cobertura", _base_obj["cobertura"], _sesion, _nombres_obj)
+        st.divider()
+        campanas_ui.panel_cobertura_articulos(dim_art, _sesion)
+    with _t_mv:
+        campanas_ui.panel_campanas("mis_ventas", _base_obj["mis_ventas"], _base_obj["cfg_campana_articulo"], _sesion, _nombres_obj, dim_art)
+    with _t_cf:
+        campanas_ui.panel_campanas("club_faro", _base_obj["club_faro"], _base_obj["cfg_club_faro_articulo"], _sesion, _nombres_obj, dim_art)
+    with _t_11:
+        campanas_ui.panel_campanas("titulares", None, _base_obj["cfg_11_titulares_articulo"], _sesion, _nombres_obj, dim_art)
 
 with tab_usr:
     import usuarios_ui

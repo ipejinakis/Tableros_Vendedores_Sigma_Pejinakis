@@ -22,6 +22,8 @@ from streamlit.errors import StreamlitAPIException  # noqa: E402
 
 from barras import capa_proyeccion, leyenda_avance, x_texto  # noqa: E402
 from estilo import AZUL, GRIS_MARCA, TXT, esc, mostrar_logo, texto_grande  # noqa: E402
+from sigma_conn import config_bimestre as CB  # noqa: E402
+from sigma_conn import config_campanas as CS  # noqa: E402
 from sigma_conn import config_objetivos as CO  # noqa: E402
 from sigma_conn import negocio as N  # noqa: E402
 from sigma_conn import objetivos as O  # noqa: E402
@@ -77,6 +79,14 @@ dim_art, dim_vend = tablas["dim_articulo"], tablas["dim_vendedor"]
 if dim_art is None or dim_vend is None:
     st.error("Faltan las tablas de artículos o vendedores. Avisar al administrador.")
     st.stop()
+
+# Objetivos, campañas y artículos del bimestre: los editados por los supervisores (si los hay) o los del Excel
+tablas["obj_cobertura"] = CB.objetivos_vigentes("cobertura", inicio_b, tablas["obj_cobertura"])
+tablas["obj_mis_ventas"], tablas["cfg_campana_articulo"], NOMBRES_CAMP = CS.tablas_vigentes(
+    "mis_ventas", inicio_b, tablas["obj_mis_ventas"], tablas["cfg_campana_articulo"])
+tablas["obj_club_faro"], tablas["cfg_club_faro_articulo"], LINEAS_CF = CS.tablas_vigentes(
+    "club_faro", inicio_b, tablas["obj_club_faro"], tablas["cfg_club_faro_articulo"])
+tablas["cfg_11_titulares_articulo"], LINEAS_T, OBJ_CANAL_T, OBJ_SUBCANAL_T = CS.titulares_vigentes(inicio_b, tablas["cfg_11_titulares_articulo"])
 
 ventas_mes = ventas[(pd.to_datetime(ventas["fecha"]) >= pd.Timestamp(inicio_m)) & (pd.to_datetime(ventas["fecha"]) <= pd.Timestamp(fin_m))]
 ultimo = TB.ultimo_dia_con_ventas(ventas_mes)
@@ -149,7 +159,7 @@ st.caption("La barra es lo que vendiste (color = tu estado); las marcas grises E
 
 _obj_cf = tablas["obj_club_faro"]
 _tiene_cf = _obj_cf is not None and not _obj_cf[_obj_cf["vendedor_id"].astype(str) == VID].empty
-_tiene_11t = tablas["cfg_11_titulares_articulo"] is not None and tablas["dim_cliente"] is not None
+_tiene_11t = tablas["cfg_11_titulares_articulo"] is not None and tablas["dim_cliente"] is not None and bool(LINEAS_T)
 _nombres_tabs = (["Mi ritmo", "Mi cobertura", "Mis campañas"] + (["Club Faro"] if _tiene_cf else [])
                  + (["11 Titulares"] if _tiene_11t else []) + ["Mis canales"])
 _tabs = dict(zip(_nombres_tabs, st.tabs(_nombres_tabs)))
@@ -213,7 +223,7 @@ with tab_cob:
         if mis_obj.empty:
             st.info("No tenés objetivos de cobertura asignados.")
         else:
-            tc, rc = TB.cobertura_vendedores(ventas, dim_art, dim_vend, mis_obj, inicio_b, fin_b, corte)
+            tc, rc = TB.cobertura_vendedores(ventas, dim_art, dim_vend, mis_obj, inicio_b, fin_b, corte, CS.excepciones_cobertura(inicio_b))
             tc = tc.rename(columns={"clientes": "logrado"}).assign(esperado_valor=lambda d: d["esperado_clientes"])
             st.write(f"Clientes distintos que te compraron cada categoría en el bimestre {inicio_b:%d/%m} – {fin_b:%d/%m/%Y}. "
                      f"Avance esperado a hoy: **{rc['esperado_pct'] * 100:.0f}%**.")
@@ -237,7 +247,7 @@ with tab_mv:
         if mis_mv.empty:
             st.info("No tenés objetivos de campañas asignados.")
         else:
-            mv = TB.mis_ventas_vendedores(ventas, dim_art, dim_vend, mis_mv, cfg_camp, inicio_b, fin_b, corte)
+            mv = TB.mis_ventas_vendedores(ventas, dim_art, dim_vend, mis_mv, cfg_camp, inicio_b, fin_b, corte, NOMBRES_CAMP)
             mv = mv.rename(columns={"logrado": "logrado", "target": "objetivo"})
             if int((cfg_camp["fuente"] == "por defecto (S)").sum()):
                 st.warning("Resultados provisorios: todavía no están confirmados los artículos de cada campaña.")
@@ -259,14 +269,14 @@ if _tiene_cf:
         if cfg_cf is None or dim_cli is None:
             st.info("Todavía no están cargados los artículos de Club Faro.")
         else:
-            cf, rcf = TB.club_faro_vendedores(ventas, dim_art, dim_cli, dim_vend, cfg_cf, mis_cf, inicio_b, fin_b, corte)
+            cf, rcf = TB.club_faro_vendedores(ventas, dim_art, dim_cli, dim_vend, cfg_cf, mis_cf, inicio_b, fin_b, corte, LINEAS_CF)
             cf = cf[(cf["vendedor_id"].astype(str) == VID) & (cf["estado"] != "sin_objetivo")]   # el panel del vendedor muestra solo lo que tiene objetivo
             if int((cfg_cf["fuente"] == "por defecto (S)").sum()):
                 st.warning("Resultados provisorios: todavía no están confirmados los artículos de cada línea.")
             st.write(f"Clientes que te compraron cada línea de Club Faro en el bimestre {inicio_b:%d/%m} – {fin_b:%d/%m/%Y}. "
                      f"Con 1 unidad el cliente ya suma. Avance esperado a hoy: **{rcf['esperado_pct'] * 100:.0f}%**.")
             leyenda_avance()
-            st.altair_chart(_barras_avance(cf, "panel", [i["nombre"] for i in N.CLUB_FARO_LINEAS.values() if i["nombre"] in set(cf["panel"])]))
+            st.altair_chart(_barras_avance(cf, "panel", [i["nombre"] for i in LINEAS_CF.values() if i["nombre"] in set(cf["panel"])]))
             faltan_txt = " · ".join(f"{r.panel}: <b>{r.faltan:,.0f}</b>".replace(",", ".") for r in cf.itertuples() if r.faltan > 0)
             if faltan_txt:
                 texto_grande(f"🎯 Te faltan clientes para cumplir: {faltan_txt}")
@@ -286,7 +296,7 @@ if _tiene_11t:
     with _tabs["11 Titulares"]:
         cfg_t, dim_cli_t = tablas["cfg_11_titulares_articulo"], tablas["dim_cliente"]
         ventas_b = ventas[(pd.to_datetime(ventas["fecha"]) >= pd.Timestamp(inicio_b)) & (pd.to_datetime(ventas["fecha"]) <= pd.Timestamp(fin_b))]
-        rt = TB.titulares_resumen(ventas_b, dim_art, dim_cli_t, cfg_t, inicio_b, fin_b, corte)
+        rt = TB.titulares_resumen(ventas_b, dim_art, dim_cli_t, cfg_t, inicio_b, fin_b, corte, LINEAS_T, OBJ_CANAL_T, OBJ_SUBCANAL_T)
         # Tu aporte: clientes tuyos que califican en cada línea (misma regla, solo con tus ventas)
         mis_cc = TB.titulares_compras(ventas_b[ventas_b["vendedor_id"].astype(str) == VID], dim_art, dim_cli_t, cfg_t, inicio_b, corte)
         aporte = mis_cc.groupby("linea")["cliente_id"].nunique()

@@ -233,7 +233,8 @@ def fraccion_esperada(inicio: date, fin: date, corte: date) -> float:
     return min(O.dias_de_venta(inicio, min(corte, fin)) / total, 1.0)
 
 
-def clientes_con_compra(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, inicio: date, corte: date) -> pd.DataFrame:
+def clientes_con_compra(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, inicio: date, corte: date,
+                        excepciones: dict | None = None) -> pd.DataFrame:
     """Una fila por (vendedor, categoría, cliente) con al menos una compra válida de la categoría entre `inicio` y `corte`.
 
     Compra válida = ítem de `ventas_para_objetivos` (sin anuladas, sin Morillo, sin VARIOS de Unilever) que no es nota de
@@ -244,18 +245,23 @@ def clientes_con_compra(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, inicio
     v = v[(f >= pd.Timestamp(inicio)) & (f <= pd.Timestamp(corte)) & ~v["es_nc"].astype(bool) & (v["unidades"] > 0)]
     cat = dim_articulo.drop_duplicates("articulo_id").assign(articulo_id=lambda d: d["articulo_id"].astype("string")) \
         .set_index("articulo_id")["categoria_cobertura"]
+    if excepciones:       # artículos que los supervisores reasignaron a otra categoría (o a ninguna) en este bimestre
+        cat = cat.astype("object")
+        for a, c in excepciones.items():
+            cat.loc[str(a)] = None if c == "NINGUNA" else c
     v = v.assign(categoria=v["articulo_id"].astype("string").map(cat), vendedor_id=v["vendedor_id"].astype("string"))
     v = v[v["categoria"].isin(N.CATEGORIAS_COBERTURA)]
     return v[["vendedor_id", "categoria", "cliente_id"]].drop_duplicates().reset_index(drop=True)
 
 
 def cobertura_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_vendedor: pd.DataFrame,
-                         obj_cobertura: pd.DataFrame, inicio: date, fin: date, corte: date) -> tuple[pd.DataFrame, dict]:
+                         obj_cobertura: pd.DataFrame, inicio: date, fin: date, corte: date,
+                         excepciones: dict | None = None) -> tuple[pd.DataFrame, dict]:
     """Cobertura (clientes con compra) por vendedor y categoría contra su objetivo del bimestre.
 
     Devuelve (tabla, resumen). La tabla trae una fila por (vendedor con objetivo × categoría), aunque no tenga clientes.
     El resumen trae, por categoría, los clientes distintos de TODA la distribuidora frente al objetivo total."""
-    cc = clientes_con_compra(ventas, dim_articulo, inicio, corte)
+    cc = clientes_con_compra(ventas, dim_articulo, inicio, corte, excepciones)
     por_vc = cc.groupby(["vendedor_id", "categoria"])["cliente_id"].nunique()
     esperado = fraccion_esperada(inicio, fin, corte)
     nombres = (dim_vendedor.drop_duplicates("vendedor_id").assign(vendedor_id=lambda d: d["vendedor_id"].astype("string"))
@@ -290,13 +296,15 @@ def cobertura_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_v
 # ----------------------------------------------------------------------------- Mis Ventas (campañas Unilever)
 def mis_ventas_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_vendedor: pd.DataFrame,
                           obj_mis_ventas: pd.DataFrame, cfg_campana: pd.DataFrame,
-                          inicio: date, fin: date, corte: date) -> pd.DataFrame:
+                          inicio: date, fin: date, corte: date, nombres_camp: dict | None = None) -> pd.DataFrame:
     """Avance de cada vendedor en cada campaña de Mis Ventas contra su target del bimestre.
 
     Una fila por fila de `obj_mis_ventas` (vendedor × campaña × tipo). Los artículos de cada campaña salen de
     `cfg_campana` (solo los de `incluir=True`). **COBERTURA** = clientes distintos con al menos una compra de la
     campaña (sin NC, unidades > 0); **VOLUMEN** = unidades netas de la campaña (las NC restan). Mismas reglas de
-    base que el resto de los objetivos (`ventas_para_objetivos`, todos los canales). Semáforo = `estado_avance`."""
+    base que el resto de los objetivos (`ventas_para_objetivos`, todos los canales). Semáforo = `estado_avance`.
+    `nombres_camp`: {clave de campaña: nombre} del bimestre (sin él, las de `negocio.py`)."""
+    nombres_camp = N.CAMPANA_NOMBRE if nombres_camp is None else nombres_camp
     v = T.ventas_para_objetivos(ventas, dim_articulo)
     f = pd.to_datetime(v["fecha"])
     v = v[(f >= pd.Timestamp(inicio)) & (f <= pd.Timestamp(corte))].copy()
@@ -320,8 +328,8 @@ def mis_ventas_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_
         unidad = "clientes" if tipo == "COBERTURA" else "unidades"
         filas.append({
             "vendedor_id": vid, "vendedor": nombres.get(vid, vid), "campana": camp,
-            "campana_nombre": N.CAMPANA_NOMBRE.get(camp, camp), "tipo": tipo, "unidad": unidad,
-            "panel": f"{N.CAMPANA_NOMBRE.get(camp, camp)} · {tipo.lower()} ({unidad})",
+            "campana_nombre": nombres_camp.get(camp, camp), "tipo": tipo, "unidad": unidad,
+            "panel": f"{nombres_camp.get(camp, camp)} · {tipo.lower()} ({unidad})",
             "logrado": logrado, "target": target, "avance": avance, "esperado_pct": esperado,
             "esperado_valor": target * esperado, "faltan": max(target - logrado, 0.0),
             "estado": estado, "estado_txt": ESTADO_AVANCE_TXT[estado],
@@ -359,12 +367,14 @@ def tipo_cliente(rubro_cod) -> str:
 
 
 def club_faro_compras(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_cliente: pd.DataFrame,
-                      cfg_art: pd.DataFrame, inicio: date, corte: date) -> pd.DataFrame:
+                      cfg_art: pd.DataFrame, inicio: date, corte: date, lineas: dict | None = None) -> pd.DataFrame:
     """Compras que cuentan para Club Faro: una fila por (vendedor, línea, cliente, artículo) entre `inicio` y `corte`.
 
     Compra válida = ítem de `ventas_para_objetivos` que no es nota de crédito y tiene unidades > 0 (con 1 unidad alcanza);
     solo artículos con INCLUIR = S. El cliente tiene que ser del tipo que pide la línea (AS o TRAD según su rubro).
-    Las NC no descuentan clientes (misma convención que la cobertura de Unilever)."""
+    Las NC no descuentan clientes (misma convención que la cobertura de Unilever).
+    `lineas`: catálogo de líneas del bimestre (sin él, el de `negocio.py`)."""
+    lineas = N.CLUB_FARO_LINEAS if lineas is None else lineas
     v = T.ventas_para_objetivos(ventas, dim_articulo)
     f = pd.to_datetime(v["fecha"])
     v = v[(f >= pd.Timestamp(inicio)) & (f <= pd.Timestamp(corte)) & ~v["es_nc"].astype(bool) & (v["unidades"] > 0)]
@@ -378,23 +388,24 @@ def club_faro_compras(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_clie
     rubro = dim_cliente.drop_duplicates("cliente_id").assign(cliente_id=lambda d: d["cliente_id"].astype("string")) \
         .set_index("cliente_id")["rubro_cod"]
     v["tipo_cliente"] = v["cliente_id"].map(rubro).map(tipo_cliente)
-    v = v[v["tipo_cliente"] == v["linea_cf"].map(lambda k: N.CLUB_FARO_LINEAS[k]["tipo_cliente"])]
+    v = v[v["tipo_cliente"] == v["linea_cf"].map(lambda k: lineas[k]["tipo_cliente"])]
     return v[["vendedor_id", "linea_cf", "cliente_id", "articulo_id"]].rename(columns={"linea_cf": "linea"}) \
         .drop_duplicates().reset_index(drop=True)
 
 
 def club_faro_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_cliente: pd.DataFrame,
                          dim_vendedor: pd.DataFrame, cfg_art: pd.DataFrame, obj: pd.DataFrame,
-                         inicio: date, fin: date, corte: date) -> tuple[pd.DataFrame, dict]:
+                         inicio: date, fin: date, corte: date, lineas: dict | None = None) -> tuple[pd.DataFrame, dict]:
     """Avance de Club Faro por vendedor y línea contra su objetivo (clientes con compra) y lo que falta.
 
     Líneas con modo `clientes`: clientes distintos con compra. Línea `cliente_sku` (blancos dulces): cada par
     (cliente, SKU) suma 1. Devuelve (tabla, resumen); la tabla trae una fila por (vendedor con objetivo × línea), con
     las mismas columnas de semáforo que cobertura (`logrado`, `objetivo`, `avance`, `esperado_valor`, `faltan`, `estado`)."""
-    compras = club_faro_compras(ventas, dim_articulo, dim_cliente, cfg_art, inicio, corte)
+    lineas = N.CLUB_FARO_LINEAS if lineas is None else lineas
+    compras = club_faro_compras(ventas, dim_articulo, dim_cliente, cfg_art, inicio, corte, lineas)
     logrado = {}
     for (vid, linea), g in compras.groupby(["vendedor_id", "linea"]):
-        modo = N.CLUB_FARO_LINEAS[linea]["modo"]
+        modo = lineas[linea]["modo"]
         logrado[(str(vid), linea)] = int(g["cliente_id"].nunique() if modo == "clientes" else len(g))
     esperado = fraccion_esperada(inicio, fin, corte)
     nombres = (dim_vendedor.drop_duplicates("vendedor_id").assign(vendedor_id=lambda d: d["vendedor_id"].astype("string"))
@@ -409,7 +420,7 @@ def club_faro_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_c
         filas.append({
             "vendedor_id": vid, "vendedor": nombres.get(vid) or r.nombre_excel, "nombre_excel": r.nombre_excel,
             "supervisor": r.supervisor_excel,
-            "linea": linea, "panel": N.CLUB_FARO_LINEAS[linea]["nombre"], "tipo_cliente": r.tipo_cliente,
+            "linea": linea, "panel": lineas[linea]["nombre"], "tipo_cliente": r.tipo_cliente,
             "logrado": lg, "objetivo": objetivo, "avance": avance, "esperado_pct": esperado,
             "esperado_valor": objetivo * esperado, "faltan": max(objetivo - lg, 0.0),
             "estado": estado, "estado_txt": ESTADO_AVANCE_TXT[estado], "supuesto": bool(r.supuesto)})
@@ -420,13 +431,13 @@ def club_faro_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_c
             continue
         filas.append({
             "vendedor_id": vid, "vendedor": nombres[vid], "nombre_excel": "", "supervisor": "",
-            "linea": linea, "panel": N.CLUB_FARO_LINEAS[linea]["nombre"], "tipo_cliente": N.CLUB_FARO_LINEAS[linea]["tipo_cliente"],
+            "linea": linea, "panel": lineas[linea]["nombre"], "tipo_cliente": lineas[linea]["tipo_cliente"],
             "logrado": lg, "objetivo": 0.0, "avance": 0.0, "esperado_pct": float("nan"),
             "esperado_valor": 0.0, "faltan": 0.0,
             "estado": "sin_objetivo", "estado_txt": ESTADO_CF_TXT["sin_objetivo"], "supuesto": False})
     tabla = pd.DataFrame(filas)
     por_linea = {}
-    for linea in N.CLUB_FARO_LINEAS:
+    for linea in lineas:
         sub = tabla[(tabla["linea"] == linea) & (tabla["objetivo"] > 0)] if len(tabla) else tabla
         lg, ob = (float(sub["logrado"].sum()), float(sub["objetivo"].sum())) if len(sub) else (0.0, 0.0)
         av = lg / ob if ob else 0.0
@@ -470,11 +481,16 @@ def titulares_compras(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_clie
 
 
 def titulares_resumen(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_cliente: pd.DataFrame, cfg_art: pd.DataFrame,
-                      inicio: date, fin: date, corte: date) -> dict:
+                      inicio: date, fin: date, corte: date, lineas_t: dict | None = None, obj_canal: dict | None = None,
+                      obj_subcanal: dict | None = None) -> dict:
     """CCC de 11 Titulares del distribuidor: por línea, por canal y por subcanal de OP & VTK, contra sus objetivos.
 
     Devuelve {'lineas', 'canales', 'subcanales'} (DataFrames con logrado, objetivo, avance, esperado_valor, faltan, estado)
     y 'esperado_pct'. Por canal/subcanal el logrado son clientes distintos que califican en AL MENOS una línea."""
+    lineas_t = N.TITULARES_LINEAS if lineas_t is None else lineas_t          # líneas, objetivos y canales del bimestre (sin ellos, los de `negocio.py`)
+    obj_canal = N.TITULARES_OBJ_CANAL if obj_canal is None else obj_canal
+    obj_subcanal = N.TITULARES_OBJ_SUBCANAL if obj_subcanal is None else obj_subcanal
+    propias = tuple(k for k, i in lineas_t.items() if i.get("propia"))
     c = titulares_compras(ventas, dim_articulo, dim_cliente, cfg_art, inicio, corte)
     esperado = fraccion_esperada(inicio, fin, corte)
 
@@ -485,10 +501,10 @@ def titulares_resumen(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_clie
                 "esperado_valor": objetivo * esperado, "faltan": max(objetivo - logrado, 0.0), "estado": est,
                 "estado_txt": ESTADO_CF_TXT[est]}
     lineas = pd.DataFrame([fila(i["nombre"], c.loc[c["linea"] == k, "cliente_id"].nunique(), i["objetivo"], linea=k)
-                           for k, i in N.TITULARES_LINEAS.items()])
-    c_of = c[~c["linea"].isin(N.TITULARES_LINEAS_PROPIAS)]   # canales y subcanales: solo las líneas que pide Peñaflor (no "Elementos")
-    canales = pd.DataFrame([fila(k, c_of.loc[c_of["canal"] == k, "cliente_id"].nunique(), N.TITULARES_OBJ_CANAL[k]) for k in N.TITULARES_CANALES])
-    sub = [fila(k, c_of.loc[c_of["subcanal"] == k, "cliente_id"].nunique(), o) for k, o in N.TITULARES_OBJ_SUBCANAL.items()]
+                           for k, i in lineas_t.items()])
+    c_of = c[~c["linea"].isin(propias)]   # canales y subcanales: solo las líneas que pide Peñaflor (no "Elementos")
+    canales = pd.DataFrame([fila(k, c_of.loc[c_of["canal"] == k, "cliente_id"].nunique(), obj_canal.get(k, 0)) for k in N.TITULARES_CANALES])
+    sub = [fila(k, c_of.loc[c_of["subcanal"] == k, "cliente_id"].nunique(), o) for k, o in obj_subcanal.items()]
     return {"lineas": lineas, "canales": canales, "subcanales": pd.DataFrame(sub), "esperado_pct": esperado,
             "inicio": inicio, "fin": fin, "corte": corte}
 

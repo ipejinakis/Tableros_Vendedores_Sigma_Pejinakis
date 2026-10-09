@@ -243,6 +243,14 @@ def test_clientes_con_compra_reglas():
     assert c101[c101.categoria == "HC"].empty
 
 
+def test_clientes_con_compra_con_excepciones_de_categoria():
+    cc = TB.clientes_con_compra(_ventas_cob(), ART_COB, date(2026, 9, 1), date(2026, 9, 20),
+                                {"SIN": "FOOD", "B1": "NINGUNA"})
+    c101 = cc[cc["vendedor_id"] == "101"]
+    assert sorted(c101.loc[c101.categoria == "FOOD", "cliente_id"]) == ["c1", "c3", "c4"]     # el combo sin asignar pasó a FOOD
+    assert c101[c101.categoria == "BPC"].empty                                                 # B1 ya no cuenta en ninguna categoría
+
+
 def test_cobertura_vendedores_tabla_y_resumen():
     tabla, res = TB.cobertura_vendedores(_ventas_cob(), ART_COB, VEND, _obj_cob(),
                                          date(2026, 9, 1), date(2026, 10, 31), date(2026, 9, 20))
