@@ -77,11 +77,12 @@ def ultimo_dia_con_ventas(ventas: pd.DataFrame) -> date | None:
 
 # ----------------------------------------------------------------------------- facturación por vendedor
 def facturacion_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_vendedor: pd.DataFrame,
-                           corte: date, cfg: ConfigFact | None = None) -> tuple[pd.DataFrame, dict]:
+                           corte: date, cfg: ConfigFact | None = None, feriados=None) -> tuple[pd.DataFrame, dict]:
     """Una fila por vendedor con escala de preventa (aunque no haya vendido) y un resumen.
 
     `ventas`: ventas del mes (fact_ventas_item). `corte`: último día contado (inclusive).
     `cfg`: configuración de objetivos del mes (escalas, premios, perfiles); sin ella rigen los valores de `negocio.py`.
+    `feriados`: fechas que no cuentan como día de venta (sin ellas, solo los domingos).
     Devuelve (tabla, resumen). Las columnas de dinero son neto s/IVA en pesos."""
     cfg = cfg or _CFG0
     v = T.ventas_para_objetivos(ventas, dim_articulo)
@@ -101,7 +102,7 @@ def facturacion_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim
     for vid, perfil in sorted(cfg.vendedor_perfil.items()):
         canales = por_canal.loc[vid] if vid in por_canal.index else pd.Series(0.0, index=CANALES)
         vendido = float(canales.sum())
-        ev = O.evaluar_facturacion(vendido, perfil, corte, cfg)
+        ev = O.evaluar_facturacion(vendido, perfil, corte, cfg, feriados)
         e1, e2, e3 = (e["objetivo"] for e in ev["escalones"])
         sig = ev["siguiente"]
         estado = estado_facturacion(ev)
@@ -128,7 +129,7 @@ def facturacion_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim
     sin_escala = sin_escala[["vendedor_id", "vendedor", "vendido"]].sort_values("vendido", ascending=False).reset_index(drop=True)
 
     resumen = {
-        "corte": corte, "dias_transcurridos": O.dias_transcurridos(corte), "dias_restantes": O.dias_restantes(corte),
+        "corte": corte, "dias_transcurridos": O.dias_transcurridos(corte, feriados), "dias_restantes": O.dias_restantes(corte, feriados),
         "total_con_escala": float(tabla["vendido"].sum()), "total_sin_escala": float(sin_escala["vendido"].sum()),
         "total_empresa": float(v["importe_neto"].sum()),
         "por_canal_empresa": {c: float(por_canal[c].sum()) for c in CANALES},
@@ -142,12 +143,12 @@ def facturacion_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim
 
 # ----------------------------------------------------------------------------- ritmo del mes
 def ritmo_mes(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, corte: date,
-              vendedor_ids: list[str] | None = None, cfg: ConfigFact | None = None) -> pd.DataFrame:
+              vendedor_ids: list[str] | None = None, cfg: ConfigFact | None = None, feriados=None) -> pd.DataFrame:
     """Venta acumulada día por día del mes de `corte` frente a la ruta de cada escalón.
 
     Una fila por día calendario del mes. `acumulado` llega hasta `corte` (después es NaN).
     `esc1/esc2/esc3` = ruta recta hasta el objetivo del escalón: objetivo × (días de venta pasados / 26), tope 100 %
-    (objetivo diario = mensual / 26). Con varios vendedores, el acumulado y los objetivos se suman (la ruta es
+    (objetivo diario = mensual / 26; cada feriado del mes baja el 26 en uno y no cuenta como día pasado). Con varios vendedores, el acumulado y los objetivos se suman (la ruta es
     "si todos llegan a ese escalón"). Solo vendedores con escala de preventa."""
     cfg = cfg or _CFG0
     ids = [str(i) for i in (vendedor_ids if vendedor_ids else sorted(cfg.vendedor_perfil)) if str(i) in cfg.vendedor_perfil]
@@ -160,7 +161,8 @@ def ritmo_mes(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, corte: date,
     diario = por_dia.reindex(dias, fill_value=0.0)
     acumulado = diario.cumsum().where(dias <= pd.Timestamp(corte))
     objetivos = [sum(cfg.escalas[cfg.vendedor_perfil[i]][k] for i in ids) for k in range(3)]
-    fraccion = [min(O.dias_de_venta(primero, d.date()) / N.DIAS_OBJETIVO_MES, 1.0) for d in dias]
+    divisor = O.dias_objetivo_mes(corte.year, corte.month, feriados)
+    fraccion = [min(O.dias_de_venta(primero, d.date(), feriados) / divisor, 1.0) for d in dias]
     out = pd.DataFrame({"fecha": dias, "acumulado": acumulado.to_numpy()})
     for k in range(3):
         out[f"esc{k + 1}"] = [objetivos[k] * f for f in fraccion]
@@ -225,12 +227,12 @@ def agregar_proyeccion(df: pd.DataFrame, tope: float = 1.5) -> pd.DataFrame:
     return d
 
 
-def fraccion_esperada(inicio: date, fin: date, corte: date) -> float:
-    """Avance lineal esperado por días de venta (lun–sáb) entre `inicio` y `fin`, medido hasta `corte` inclusive."""
-    total = O.dias_de_venta(inicio, fin)
+def fraccion_esperada(inicio: date, fin: date, corte: date, feriados=None) -> float:
+    """Avance lineal esperado por días de venta (lun–sáb) entre `inicio` y `fin` (sin feriados), medido hasta `corte` inclusive."""
+    total = O.dias_de_venta(inicio, fin, feriados)
     if total == 0:
         return 1.0
-    return min(O.dias_de_venta(inicio, min(corte, fin)) / total, 1.0)
+    return min(O.dias_de_venta(inicio, min(corte, fin), feriados) / total, 1.0)
 
 
 def clientes_con_compra(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, inicio: date, corte: date,
@@ -256,14 +258,14 @@ def clientes_con_compra(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, inicio
 
 def cobertura_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_vendedor: pd.DataFrame,
                          obj_cobertura: pd.DataFrame, inicio: date, fin: date, corte: date,
-                         excepciones: dict | None = None) -> tuple[pd.DataFrame, dict]:
+                         excepciones: dict | None = None, feriados=None) -> tuple[pd.DataFrame, dict]:
     """Cobertura (clientes con compra) por vendedor y categoría contra su objetivo del bimestre.
 
     Devuelve (tabla, resumen). La tabla trae una fila por (vendedor con objetivo × categoría), aunque no tenga clientes.
     El resumen trae, por categoría, los clientes distintos de TODA la distribuidora frente al objetivo total."""
     cc = clientes_con_compra(ventas, dim_articulo, inicio, corte, excepciones)
     por_vc = cc.groupby(["vendedor_id", "categoria"])["cliente_id"].nunique()
-    esperado = fraccion_esperada(inicio, fin, corte)
+    esperado = fraccion_esperada(inicio, fin, corte, feriados)
     nombres = (dim_vendedor.drop_duplicates("vendedor_id").assign(vendedor_id=lambda d: d["vendedor_id"].astype("string"))
                .set_index("vendedor_id")["nombre"].to_dict()) if len(dim_vendedor) else {}
     filas = []
@@ -296,7 +298,7 @@ def cobertura_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_v
 # ----------------------------------------------------------------------------- Mis Ventas (campañas Unilever)
 def mis_ventas_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_vendedor: pd.DataFrame,
                           obj_mis_ventas: pd.DataFrame, cfg_campana: pd.DataFrame,
-                          inicio: date, fin: date, corte: date, nombres_camp: dict | None = None) -> pd.DataFrame:
+                          inicio: date, fin: date, corte: date, nombres_camp: dict | None = None, feriados=None) -> pd.DataFrame:
     """Avance de cada vendedor en cada campaña de Mis Ventas contra su target del bimestre.
 
     Una fila por fila de `obj_mis_ventas` (vendedor × campaña × tipo). Los artículos de cada campaña salen de
@@ -315,7 +317,7 @@ def mis_ventas_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_
     unidades = vc.groupby(["vendedor_id", "campana"])["unidades"].sum()
     compras = vc[~vc["es_nc"].astype(bool) & (vc["unidades"] > 0)]
     clientes = compras.groupby(["vendedor_id", "campana"])["cliente_id"].nunique()
-    esperado = fraccion_esperada(inicio, fin, corte)
+    esperado = fraccion_esperada(inicio, fin, corte, feriados)
     nombres = (dim_vendedor.drop_duplicates("vendedor_id").assign(vendedor_id=lambda d: d["vendedor_id"].astype("string"))
                .set_index("vendedor_id")["nombre"].to_dict()) if len(dim_vendedor) else {}
     filas = []
@@ -395,7 +397,8 @@ def club_faro_compras(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_clie
 
 def club_faro_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_cliente: pd.DataFrame,
                          dim_vendedor: pd.DataFrame, cfg_art: pd.DataFrame, obj: pd.DataFrame,
-                         inicio: date, fin: date, corte: date, lineas: dict | None = None) -> tuple[pd.DataFrame, dict]:
+                         inicio: date, fin: date, corte: date, lineas: dict | None = None,
+                         feriados=None) -> tuple[pd.DataFrame, dict]:
     """Avance de Club Faro por vendedor y línea contra su objetivo (clientes con compra) y lo que falta.
 
     Líneas con modo `clientes`: clientes distintos con compra. Línea `cliente_sku` (blancos dulces): cada par
@@ -407,7 +410,7 @@ def club_faro_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_c
     for (vid, linea), g in compras.groupby(["vendedor_id", "linea"]):
         modo = lineas[linea]["modo"]
         logrado[(str(vid), linea)] = int(g["cliente_id"].nunique() if modo == "clientes" else len(g))
-    esperado = fraccion_esperada(inicio, fin, corte)
+    esperado = fraccion_esperada(inicio, fin, corte, feriados)
     nombres = (dim_vendedor.drop_duplicates("vendedor_id").assign(vendedor_id=lambda d: d["vendedor_id"].astype("string"))
                .set_index("vendedor_id")["nombre"].to_dict()) if len(dim_vendedor) else {}
     filas = []
@@ -482,7 +485,7 @@ def titulares_compras(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_clie
 
 def titulares_resumen(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_cliente: pd.DataFrame, cfg_art: pd.DataFrame,
                       inicio: date, fin: date, corte: date, lineas_t: dict | None = None, obj_canal: dict | None = None,
-                      obj_subcanal: dict | None = None) -> dict:
+                      obj_subcanal: dict | None = None, feriados=None) -> dict:
     """CCC de 11 Titulares del distribuidor: por línea, por canal y por subcanal de OP & VTK, contra sus objetivos.
 
     Devuelve {'lineas', 'canales', 'subcanales'} (DataFrames con logrado, objetivo, avance, esperado_valor, faltan, estado)
@@ -492,7 +495,7 @@ def titulares_resumen(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_clie
     obj_subcanal = N.TITULARES_OBJ_SUBCANAL if obj_subcanal is None else obj_subcanal
     propias = tuple(k for k, i in lineas_t.items() if i.get("propia"))
     c = titulares_compras(ventas, dim_articulo, dim_cliente, cfg_art, inicio, corte)
-    esperado = fraccion_esperada(inicio, fin, corte)
+    esperado = fraccion_esperada(inicio, fin, corte, feriados)
 
     def fila(nombre, logrado, objetivo, **extra):
         av = logrado / objetivo if objetivo else 0.0

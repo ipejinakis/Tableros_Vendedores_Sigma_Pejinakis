@@ -1,6 +1,6 @@
 """Cálculos comunes de los tableros: calendario de venta, escalones de facturación, premios y avance.
 
-Reglas (Juan): se vende de lunes a sábado; feriados sin tratamiento (un feriado es un día sin venta);
+Reglas (Juan): se vende de lunes a sábado; los feriados cargados en el tablero (config_feriados) no cuentan como día de venta;
 objetivo diario = objetivo mensual / 26; la facturación se mide s/IVA con `ventas_para_objetivos`.
 """
 from __future__ import annotations
@@ -15,60 +15,71 @@ from .config_objetivos import DEFAULT as _CFG0, ConfigFact
 
 
 # ----------------------------------------------------------------------------- calendario
-def es_dia_de_venta(d: date) -> bool:
-    return d.weekday() != 6  # lunes=0 ... sábado=5; domingo no
+# `feriados`: conjunto de fechas (config_feriados.feriados_vigentes()) que no son día de venta aunque sean de lunes a sábado.
+# Sin feriados (None) se comporta como antes.
+def es_dia_de_venta(d: date, feriados=None) -> bool:
+    return d.weekday() != 6 and not (feriados and d in feriados)  # lunes=0 ... sábado=5; domingo y feriados no
 
 
-def dias_de_venta(desde: date, hasta: date) -> int:
-    """Días lunes–sábado entre `desde` y `hasta`, ambos inclusive."""
+def dias_de_venta(desde: date, hasta: date, feriados=None) -> int:
+    """Días de venta (lunes–sábado que no son feriado) entre `desde` y `hasta`, ambos inclusive."""
     if hasta < desde:
         return 0
-    return sum(es_dia_de_venta(desde + timedelta(days=i)) for i in range((hasta - desde).days + 1))
+    return sum(es_dia_de_venta(desde + timedelta(days=i), feriados) for i in range((hasta - desde).days + 1))
 
 
 def _ultimo_dia(d: date) -> date:
     return date(d.year, d.month, calendar.monthrange(d.year, d.month)[1])
 
 
-def dias_de_venta_mes(anio: int, mes: int) -> int:
-    return dias_de_venta(date(anio, mes, 1), date(anio, mes, calendar.monthrange(anio, mes)[1]))
+def dias_de_venta_mes(anio: int, mes: int, feriados=None) -> int:
+    return dias_de_venta(date(anio, mes, 1), date(anio, mes, calendar.monthrange(anio, mes)[1]), feriados)
 
 
-def dias_transcurridos(fecha: date) -> int:
+def dias_transcurridos(fecha: date, feriados=None) -> int:
     """Días de venta del mes desde el 1 hasta `fecha` inclusive."""
-    return dias_de_venta(date(fecha.year, fecha.month, 1), fecha)
+    return dias_de_venta(date(fecha.year, fecha.month, 1), fecha, feriados)
 
 
-def dias_restantes(fecha: date) -> int:
+def dias_restantes(fecha: date, feriados=None) -> int:
     """Días de venta del mes DESPUÉS de `fecha` (no cuenta `fecha`)."""
-    return dias_de_venta(fecha + timedelta(days=1), _ultimo_dia(fecha))
+    return dias_de_venta(fecha + timedelta(days=1), _ultimo_dia(fecha), feriados)
+
+
+def dias_objetivo_mes(anio: int, mes: int, feriados=None) -> int:
+    """Divisor del objetivo diario: los 26 días de siempre menos los feriados (lunes–sábado) del mes."""
+    if not feriados:
+        return N.DIAS_OBJETIVO_MES
+    libres = sum(1 for f in feriados if f.year == anio and f.month == mes and f.weekday() != 6)
+    return max(N.DIAS_OBJETIVO_MES - libres, 1)
 
 
 # ----------------------------------------------------------------------------- facturación
-def objetivo_diario(objetivo_mensual: float) -> float:
-    return objetivo_mensual / N.DIAS_OBJETIVO_MES
+def objetivo_diario(objetivo_mensual: float, dias: int | None = None) -> float:
+    return objetivo_mensual / (dias or N.DIAS_OBJETIVO_MES)
 
 
 def perfil_de(vendedor_id, cfg: ConfigFact | None = None) -> str | None:
     return (cfg or _CFG0).vendedor_perfil.get(str(vendedor_id))
 
 
-def evaluar_facturacion(vendido: float, perfil: str, fecha: date, cfg: ConfigFact | None = None) -> dict:
+def evaluar_facturacion(vendido: float, perfil: str, fecha: date, cfg: ConfigFact | None = None, feriados=None) -> dict:
     """Estado de un vendedor frente a su escala del mes.
 
     `vendido`: neto s/IVA del mes hasta `fecha` (usar el último día con ventas completas).
     Devuelve el escalón alcanzado, el premio en $ y, por escalón, avance, faltante, media diaria necesaria
-    con los días de venta que quedan y si la proyección al ritmo actual lo alcanza.
+    con los días de venta que quedan y si la proyección al ritmo actual lo alcanza. `feriados`: fechas que no cuentan como día de venta.
     """
     cfg = cfg or _CFG0
     escalas, premios = cfg.escalas[perfil], cfg.premios
-    transc, rest = dias_transcurridos(fecha), dias_restantes(fecha)
+    transc, rest = dias_transcurridos(fecha, feriados), dias_restantes(fecha, feriados)
+    dias_obj = dias_objetivo_mes(fecha.year, fecha.month, feriados)
     proyeccion = vendido / transc * (transc + rest) if transc else 0.0
     escalones = []
     for i, (obj, premio) in enumerate(zip(escalas, premios), start=1):
         falta = max(obj - vendido, 0.0)
         escalones.append({
-            "escalon": i, "objetivo": obj, "premio": premio, "objetivo_diario": objetivo_diario(obj),
+            "escalon": i, "objetivo": obj, "premio": premio, "objetivo_diario": objetivo_diario(obj, dias_obj),
             "avance_pct": vendido / obj, "alcanzado": vendido >= obj, "faltante": falta,
             "media_necesaria": (falta / rest) if rest else (0.0 if falta == 0 else None),
             "proyeccion_alcanza": proyeccion >= obj,

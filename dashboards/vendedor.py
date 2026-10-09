@@ -24,6 +24,7 @@ from barras import capa_proyeccion, leyenda_avance, x_texto  # noqa: E402
 from estilo import AZUL, GRIS_MARCA, TXT, esc, mostrar_logo, texto_grande  # noqa: E402
 from sigma_conn import config_bimestre as CB  # noqa: E402
 from sigma_conn import config_campanas as CS  # noqa: E402
+from sigma_conn import config_feriados as CFER  # noqa: E402
 from sigma_conn import config_objetivos as CO  # noqa: E402
 from sigma_conn import negocio as N  # noqa: E402
 from sigma_conn import objetivos as O  # noqa: E402
@@ -94,7 +95,8 @@ corte = sb.date_input("Corte (día inclusive)", value=min(ultimo or inicio_m, fi
 
 # ----------------------------------------------------------------------------- facturación (solo este vendedor)
 CFG = CO.config_del_mes(mes)
-tabla_total, _ = TB.facturacion_vendedores(ventas_mes, dim_art, dim_vend, corte, CFG)
+FER = CFER.feriados_vigentes()      # feriados cargados por gerentes y supervisores: no cuentan como día de venta
+tabla_total, _ = TB.facturacion_vendedores(ventas_mes, dim_art, dim_vend, corte, CFG, FER)
 fila = tabla_total[tabla_total["vendedor_id"] == VID]
 if fila.empty:
     st.error("Tu usuario no tiene una escala de facturación asociada. Avisar al administrador.")
@@ -111,7 +113,7 @@ if ultimo and corte > ultimo:
 
 c1, c2, c3 = st.columns(3)
 c1.metric("Tu venta neta del mes", TB.fmt_millones(f["vendido"]), help="Neto sin IVA, hasta el día de corte.")
-c1.caption(f"{O.dias_transcurridos(corte)} días de venta pasados · {O.dias_restantes(corte)} por venir")
+c1.caption(f"{O.dias_transcurridos(corte, FER)} días de venta pasados · {O.dias_restantes(corte, FER)} por venir")
 c2.metric("Premio ganado hoy", TB.fmt_pesos(f["premio"]), help="El premio del escalón más alto que ya alcanzaste.")
 c2.caption(f"Escalón {int(f['escalon'])}" if f["escalon"] else "Todavía sin escalón")
 c3.metric("Premio a fin de mes", TB.fmt_pesos(f["premio_proyectado"]), help="Si seguís vendiendo al ritmo de hoy.")
@@ -167,7 +169,7 @@ tab_ritmo, tab_cob, tab_mv, tab_canal = _tabs["Mi ritmo"], _tabs["Mi cobertura"]
 
 # ----------------------------------------------------------------------------- ritmo
 with tab_ritmo:
-    rit = TB.ritmo_mes(ventas_mes, dim_art, corte, [VID], CFG)
+    rit = TB.ritmo_mes(ventas_mes, dim_art, corte, [VID], CFG, FER)
     nombres = {"acumulado": "Vendido acumulado", "esc1": "Ruta escalón 1", "esc2": "Ruta escalón 2", "esc3": "Ruta escalón 3"}
     largo = rit.melt(id_vars="fecha", value_vars=list(nombres), var_name="clave", value_name="monto").dropna()
     largo["serie"] = largo["clave"].map(nombres)
@@ -223,7 +225,7 @@ with tab_cob:
         if mis_obj.empty:
             st.info("No tenés objetivos de cobertura asignados.")
         else:
-            tc, rc = TB.cobertura_vendedores(ventas, dim_art, dim_vend, mis_obj, inicio_b, fin_b, corte, CS.excepciones_cobertura(inicio_b))
+            tc, rc = TB.cobertura_vendedores(ventas, dim_art, dim_vend, mis_obj, inicio_b, fin_b, corte, CS.excepciones_cobertura(inicio_b), FER)
             tc = tc.rename(columns={"clientes": "logrado"}).assign(esperado_valor=lambda d: d["esperado_clientes"])
             st.write(f"Clientes distintos que te compraron cada categoría en el bimestre {inicio_b:%d/%m} – {fin_b:%d/%m/%Y}. "
                      f"Avance esperado a hoy: **{rc['esperado_pct'] * 100:.0f}%**.")
@@ -247,7 +249,7 @@ with tab_mv:
         if mis_mv.empty:
             st.info("No tenés objetivos de campañas asignados.")
         else:
-            mv = TB.mis_ventas_vendedores(ventas, dim_art, dim_vend, mis_mv, cfg_camp, inicio_b, fin_b, corte, NOMBRES_CAMP)
+            mv = TB.mis_ventas_vendedores(ventas, dim_art, dim_vend, mis_mv, cfg_camp, inicio_b, fin_b, corte, NOMBRES_CAMP, FER)
             mv = mv.rename(columns={"logrado": "logrado", "target": "objetivo"})
             if int((cfg_camp["fuente"] == "por defecto (S)").sum()):
                 st.warning("Resultados provisorios: todavía no están confirmados los artículos de cada campaña.")
@@ -269,7 +271,7 @@ if _tiene_cf:
         if cfg_cf is None or dim_cli is None:
             st.info("Todavía no están cargados los artículos de Club Faro.")
         else:
-            cf, rcf = TB.club_faro_vendedores(ventas, dim_art, dim_cli, dim_vend, cfg_cf, mis_cf, inicio_b, fin_b, corte, LINEAS_CF)
+            cf, rcf = TB.club_faro_vendedores(ventas, dim_art, dim_cli, dim_vend, cfg_cf, mis_cf, inicio_b, fin_b, corte, LINEAS_CF, FER)
             cf = cf[(cf["vendedor_id"].astype(str) == VID) & (cf["estado"] != "sin_objetivo")]   # el panel del vendedor muestra solo lo que tiene objetivo
             if int((cfg_cf["fuente"] == "por defecto (S)").sum()):
                 st.warning("Resultados provisorios: todavía no están confirmados los artículos de cada línea.")
@@ -296,7 +298,7 @@ if _tiene_11t:
     with _tabs["11 Titulares"]:
         cfg_t, dim_cli_t = tablas["cfg_11_titulares_articulo"], tablas["dim_cliente"]
         ventas_b = ventas[(pd.to_datetime(ventas["fecha"]) >= pd.Timestamp(inicio_b)) & (pd.to_datetime(ventas["fecha"]) <= pd.Timestamp(fin_b))]
-        rt = TB.titulares_resumen(ventas_b, dim_art, dim_cli_t, cfg_t, inicio_b, fin_b, corte, LINEAS_T, OBJ_CANAL_T, OBJ_SUBCANAL_T)
+        rt = TB.titulares_resumen(ventas_b, dim_art, dim_cli_t, cfg_t, inicio_b, fin_b, corte, LINEAS_T, OBJ_CANAL_T, OBJ_SUBCANAL_T, FER)
         # Tu aporte: clientes tuyos que califican en cada línea (misma regla, solo con tus ventas)
         mis_cc = TB.titulares_compras(ventas_b[ventas_b["vendedor_id"].astype(str) == VID], dim_art, dim_cli_t, cfg_t, inicio_b, corte)
         aporte = mis_cc.groupby("linea")["cliente_id"].nunique()

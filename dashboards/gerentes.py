@@ -25,6 +25,7 @@ from barras import capa_proyeccion, leyenda_avance, x_texto  # noqa: E402
 from estilo import esc, mostrar_logo  # noqa: E402
 from sigma_conn import config_bimestre as CB  # noqa: E402
 from sigma_conn import config_campanas as CS  # noqa: E402
+from sigma_conn import config_feriados as CFER  # noqa: E402
 from sigma_conn import config_objetivos as CO  # noqa: E402
 from sigma_conn import negocio as N  # noqa: E402
 from sigma_conn import tableros as TB  # noqa: E402
@@ -167,7 +168,8 @@ corte_b = sb.date_input("Corte del bimestre (día inclusive)", value=min(ultimo_
 sb.divider()
 
 CFG = CO.config_del_mes(CO.mes_de(corte))      # escalas, premios y perfiles vigentes del mes (editables en la pestaña Objetivos)
-tabla_total, resumen = TB.facturacion_vendedores(ventas, dim_art, dim_vend, corte, CFG)
+FER = CFER.feriados_vigentes()                 # feriados cargados en Objetivos → Feriados: no cuentan como día de venta
+tabla_total, resumen = TB.facturacion_vendedores(ventas, dim_art, dim_vend, corte, CFG, FER)
 supervisores = sorted(s for s in tabla_total["supervisor"].unique() if s)
 if _sesion.get("rol") != "gerente":      # Costa SLA y similares: solo los ve gerencia (los demás filtros y pestañas salen de `tabla`)
     supervisores = [s for s in supervisores if s not in N.SUPERVISORES_SOLO_GERENCIA]
@@ -315,7 +317,7 @@ with tab_ritmo:
     opciones.update({f"{r.vendedor} ({r.vendedor_id})": [r.vendedor_id] for r in tabla.itertuples()})
     elegido = st.selectbox("Ver", list(opciones))
     ids = opciones[elegido] or list(tabla["vendedor_id"])
-    rit = TB.ritmo_mes(ventas, dim_art, corte, ids, CFG)
+    rit = TB.ritmo_mes(ventas, dim_art, corte, ids, CFG, FER)
     nombres = {"acumulado": "Vendido acumulado", "esc1": "Ruta escalón 1", "esc2": "Ruta escalón 2", "esc3": "Ruta escalón 3"}
     largo = rit.melt(id_vars="fecha", value_vars=list(nombres), var_name="clave", value_name="monto").dropna()
     largo["serie"] = largo["clave"].map(nombres)
@@ -353,7 +355,7 @@ with tab_cob:
         st.info("Faltan los objetivos de cobertura. Correr: python scripts/etl/cargar_objetivos.py")
     elif obj_cob is not None:
         obj_cob = CB.objetivos_vigentes("cobertura", ini_b, obj_cob)        # objetivos editados en la pestaña Objetivos (si los hay)
-        tc_total, rc = TB.cobertura_vendedores(ventas_b, dim_art, dim_vend, obj_cob, ini_b, fin_b, corte_b, EXC_COB)
+        tc_total, rc = TB.cobertura_vendedores(ventas_b, dim_art, dim_vend, obj_cob, ini_b, fin_b, corte_b, EXC_COB, FER)
         tc = tc_total[tc_total["vendedor_id"].isin(tabla["vendedor_id"])].copy()
         st.subheader("Cobertura: clientes con compra por categoría")
         st.caption(f"Bimestre {ini_b:%d/%m/%Y} – {fin_b:%d/%m/%Y} · corte {corte_b:%d/%m/%Y}. Un cliente cuenta una vez por categoría "
@@ -426,10 +428,10 @@ with tab_mv:
                 "Se arman en la pestaña Objetivos → Mis Ventas.")
     else:
         ventas_m, _ = cargar_cobertura(str(store.root), store.fmt, ini_m, fin_m)
-        mv = TB.mis_ventas_vendedores(ventas_m, dim_art, dim_vend, obj_mv, cfg_camp, ini_m, fin_m, corte_b, nombres_camp)
+        mv = TB.mis_ventas_vendedores(ventas_m, dim_art, dim_vend, obj_mv, cfg_camp, ini_m, fin_m, corte_b, nombres_camp, FER)
         mv = mv[mv["vendedor_id"].isin(tabla["vendedor_id"])].copy()
         st.subheader("Mis Ventas: campañas Unilever del bimestre")
-        esp = TB.fraccion_esperada(ini_m, fin_m, corte_b)
+        esp = TB.fraccion_esperada(ini_m, fin_m, corte_b, FER)
         st.caption(f"Bimestre {ini_m:%d/%m/%Y} – {fin_m:%d/%m/%Y} · corte {corte_b:%d/%m/%Y} · avance esperado a hoy: {esp * 100:.0f}% "
                    "(por días de venta). Cobertura = clientes distintos con compra de la campaña; volumen = unidades netas "
                    "(las notas de crédito restan).")
@@ -497,7 +499,7 @@ with tab_cf:
                 "Se arman en la pestaña Objetivos → Club Faro.")
     else:
         ventas_f, _ = cargar_cobertura(str(store.root), store.fmt, ini_f, fin_f)
-        cf, rcf = TB.club_faro_vendedores(ventas_f, dim_art, dim_cli, dim_vend, cfg_cf, obj_cf, ini_f, fin_f, corte_b, lineas_cf)
+        cf, rcf = TB.club_faro_vendedores(ventas_f, dim_art, dim_cli, dim_vend, cfg_cf, obj_cf, ini_f, fin_f, corte_b, lineas_cf, FER)
         st.subheader("Club Faro (Peñaflor): clientes con compra por línea")
         st.caption(f"Bimestre {ini_f:%d/%m/%Y} – {fin_f:%d/%m/%Y} · corte {corte_b:%d/%m/%Y} · avance esperado a hoy: "
                    f"{rcf['esperado_pct'] * 100:.0f}% (por días de venta). Con comprar 1 unidad de un artículo de la línea el cliente "
@@ -588,7 +590,7 @@ with tab_11t:
                 "Se arman en la pestaña Objetivos → 11 Titulares.")
     else:
         ventas_t, _ = cargar_cobertura(str(store.root), store.fmt, ini_t, fin_t)
-        rt = TB.titulares_resumen(ventas_t, dim_art, dim_cli_t, cfg_t, ini_t, fin_t, corte_b, lineas_t, obj_canal_t, obj_subcanal_t)
+        rt = TB.titulares_resumen(ventas_t, dim_art, dim_cli_t, cfg_t, ini_t, fin_t, corte_b, lineas_t, obj_canal_t, obj_subcanal_t, FER)
         st.subheader("11 Titulares (Peñaflor): clientes con compra del distribuidor")
         st.caption(f"Período {ini_t:%d/%m/%Y} – {fin_t:%d/%m/%Y} · corte {corte_b:%d/%m/%Y} · avance esperado a hoy: "
                    f"{rt['esperado_pct'] * 100:.0f}% (por días de venta). Los objetivos son del distribuidor entero, no por vendedor. "
@@ -684,13 +686,14 @@ with tab_escalas:
 # ----------------------------------------------------------------------------- pestaña usuarios (alta, baja y clave de vendedores)
 with tab_obj:
     import campanas_ui
+    import feriados_ui
     import objetivos_bimestre_ui
     import objetivos_ui
     _nombres_obj = ({str(r.vendedor_id): str(r.nombre).title() for r in dim_vend.drop_duplicates("vendedor_id").itertuples()}
                     if len(dim_vend) else {})
     _base_obj = cargar_objetivos_base(str(store.root), store.fmt)
-    _t_fact, _t_cob, _t_mv, _t_cf, _t_11 = st.tabs(["Facturación (mensual)", "Cobertura (bimestral)", "Mis Ventas (bimestral)",
-                                                    "Club Faro (bimestral)", "11 Titulares (bimestral)"])
+    _t_fact, _t_cob, _t_mv, _t_cf, _t_11, _t_fer = st.tabs(["Facturación (mensual)", "Cobertura (bimestral)", "Mis Ventas (bimestral)",
+                                                            "Club Faro (bimestral)", "11 Titulares (bimestral)", "Feriados"])
     with _t_fact:
         objetivos_ui.panel_objetivos(_sesion, _nombres_obj)
     with _t_cob:
@@ -703,6 +706,8 @@ with tab_obj:
         campanas_ui.panel_campanas("club_faro", _base_obj["club_faro"], _base_obj["cfg_club_faro_articulo"], _sesion, _nombres_obj, dim_art)
     with _t_11:
         campanas_ui.panel_campanas("titulares", None, _base_obj["cfg_11_titulares_articulo"], _sesion, _nombres_obj, dim_art)
+    with _t_fer:
+        feriados_ui.panel_feriados(_sesion)
 
 with tab_usr:
     import usuarios_ui
