@@ -22,6 +22,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from . import config_objetivos as CO
 from . import negocio as N
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -142,8 +143,9 @@ class UsuariosStore:
         if rol not in ROLES:
             raise AuthError(f"Rol inválido: {rol!r} (usar {', '.join(ROLES)}).")
         if rol == ROL_VENDEDOR:
-            if vendedor_id is None or str(vendedor_id) not in N.VENDEDOR_PERFIL:
-                raise AuthError(f"Un vendedor necesita un código con escala de preventa ({', '.join(sorted(N.VENDEDOR_PERFIL))}).")
+            con_escala = CO.vendedores_con_escala()
+            if vendedor_id is None or str(vendedor_id) not in con_escala:
+                raise AuthError(f"Un vendedor necesita un código con escala de preventa ({', '.join(con_escala)}).")
             vendedor_id = str(vendedor_id)
             if usuario != vendedor_id:
                 raise AuthError("El usuario de un vendedor debe ser su código de vendedor.")
@@ -284,12 +286,12 @@ def vendedores_gestionables(sesion: dict | None) -> list[str]:
     if not sesion:
         return []
     if sesion.get("rol") == ROL_GERENTE:
-        return sorted(N.VENDEDOR_PERFIL)
+        return CO.vendedores_con_escala()
     if sesion.get("rol") == ROL_SUPERVISOR:
         sup = sesion.get("supervisor_id") or N.SUPERVISOR_DE_USUARIO.get(normalizar_usuario(sesion.get("usuario", "")))
         if not sup:
             return []
-        return sorted(v for v in N.VENDEDOR_PERFIL if N.SUPERVISOR_VENDEDOR.get(v) == str(sup))
+        return sorted(v for v in CO.vendedores_con_escala() if N.SUPERVISOR_VENDEDOR.get(v) == str(sup))
     return []
 
 

@@ -15,6 +15,7 @@ from dotenv import dotenv_values
 
 from . import negocio as N
 from . import objetivos as O
+from .config_objetivos import DEFAULT as _CFG0, ConfigFact
 from . import transform as T
 from .store import Store
 
@@ -76,11 +77,13 @@ def ultimo_dia_con_ventas(ventas: pd.DataFrame) -> date | None:
 
 # ----------------------------------------------------------------------------- facturación por vendedor
 def facturacion_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_vendedor: pd.DataFrame,
-                           corte: date) -> tuple[pd.DataFrame, dict]:
+                           corte: date, cfg: ConfigFact | None = None) -> tuple[pd.DataFrame, dict]:
     """Una fila por vendedor con escala de preventa (aunque no haya vendido) y un resumen.
 
     `ventas`: ventas del mes (fact_ventas_item). `corte`: último día contado (inclusive).
+    `cfg`: configuración de objetivos del mes (escalas, premios, perfiles); sin ella rigen los valores de `negocio.py`.
     Devuelve (tabla, resumen). Las columnas de dinero son neto s/IVA en pesos."""
+    cfg = cfg or _CFG0
     v = T.ventas_para_objetivos(ventas, dim_articulo)
     v = v[pd.to_datetime(v["fecha"]) <= pd.Timestamp(corte)].copy()
     v["vendedor_id"] = v["vendedor_id"].astype("string")
@@ -95,10 +98,10 @@ def facturacion_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim
                .set_index("vendedor_id")["nombre"].to_dict()) if len(dim_vendedor) else {}
 
     filas = []
-    for vid, perfil in sorted(N.VENDEDOR_PERFIL.items()):
+    for vid, perfil in sorted(cfg.vendedor_perfil.items()):
         canales = por_canal.loc[vid] if vid in por_canal.index else pd.Series(0.0, index=CANALES)
         vendido = float(canales.sum())
-        ev = O.evaluar_facturacion(vendido, perfil, corte)
+        ev = O.evaluar_facturacion(vendido, perfil, corte, cfg)
         e1, e2, e3 = (e["objetivo"] for e in ev["escalones"])
         sig = ev["siguiente"]
         estado = estado_facturacion(ev)
@@ -119,7 +122,7 @@ def facturacion_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim
         })
     tabla = pd.DataFrame(filas)
 
-    fuera = por_canal.drop(index=[i for i in por_canal.index if i in N.VENDEDOR_PERFIL])
+    fuera = por_canal.drop(index=[i for i in por_canal.index if i in cfg.vendedor_perfil])
     sin_escala = pd.DataFrame({"vendedor_id": fuera.index.astype(str), "vendido": fuera.sum(axis=1).to_numpy()})
     sin_escala["vendedor"] = sin_escala["vendedor_id"].map(lambda i: nombres.get(i, i))
     sin_escala = sin_escala[["vendedor_id", "vendedor", "vendido"]].sort_values("vendido", ascending=False).reset_index(drop=True)
@@ -139,14 +142,15 @@ def facturacion_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim
 
 # ----------------------------------------------------------------------------- ritmo del mes
 def ritmo_mes(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, corte: date,
-              vendedor_ids: list[str] | None = None) -> pd.DataFrame:
+              vendedor_ids: list[str] | None = None, cfg: ConfigFact | None = None) -> pd.DataFrame:
     """Venta acumulada día por día del mes de `corte` frente a la ruta de cada escalón.
 
     Una fila por día calendario del mes. `acumulado` llega hasta `corte` (después es NaN).
     `esc1/esc2/esc3` = ruta recta hasta el objetivo del escalón: objetivo × (días de venta pasados / 26), tope 100 %
     (objetivo diario = mensual / 26). Con varios vendedores, el acumulado y los objetivos se suman (la ruta es
     "si todos llegan a ese escalón"). Solo vendedores con escala de preventa."""
-    ids = [str(i) for i in (vendedor_ids if vendedor_ids else sorted(N.VENDEDOR_PERFIL)) if str(i) in N.VENDEDOR_PERFIL]
+    cfg = cfg or _CFG0
+    ids = [str(i) for i in (vendedor_ids if vendedor_ids else sorted(cfg.vendedor_perfil)) if str(i) in cfg.vendedor_perfil]
     v = T.ventas_para_objetivos(ventas, dim_articulo)
     v = v[v["vendedor_id"].astype("string").isin(ids)]
     primero = date(corte.year, corte.month, 1)
@@ -155,7 +159,7 @@ def ritmo_mes(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, corte: date,
     por_dia = v.assign(dia=pd.to_datetime(v["fecha"]).dt.normalize()).groupby("dia")["importe_neto"].sum()
     diario = por_dia.reindex(dias, fill_value=0.0)
     acumulado = diario.cumsum().where(dias <= pd.Timestamp(corte))
-    objetivos = [sum(N.ESCALAS_FACTURACION[N.VENDEDOR_PERFIL[i]][k] for i in ids) for k in range(3)]
+    objetivos = [sum(cfg.escalas[cfg.vendedor_perfil[i]][k] for i in ids) for k in range(3)]
     fraccion = [min(O.dias_de_venta(primero, d.date()) / N.DIAS_OBJETIVO_MES, 1.0) for d in dias]
     out = pd.DataFrame({"fecha": dias, "acumulado": acumulado.to_numpy()})
     for k in range(3):

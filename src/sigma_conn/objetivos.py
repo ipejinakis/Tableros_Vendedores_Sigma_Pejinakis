@@ -11,6 +11,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from . import negocio as N
+from .config_objetivos import DEFAULT as _CFG0, ConfigFact
 
 
 # ----------------------------------------------------------------------------- calendario
@@ -48,22 +49,23 @@ def objetivo_diario(objetivo_mensual: float) -> float:
     return objetivo_mensual / N.DIAS_OBJETIVO_MES
 
 
-def perfil_de(vendedor_id) -> str | None:
-    return N.VENDEDOR_PERFIL.get(str(vendedor_id))
+def perfil_de(vendedor_id, cfg: ConfigFact | None = None) -> str | None:
+    return (cfg or _CFG0).vendedor_perfil.get(str(vendedor_id))
 
 
-def evaluar_facturacion(vendido: float, perfil: str, fecha: date) -> dict:
+def evaluar_facturacion(vendido: float, perfil: str, fecha: date, cfg: ConfigFact | None = None) -> dict:
     """Estado de un vendedor frente a su escala del mes.
 
     `vendido`: neto s/IVA del mes hasta `fecha` (usar el último día con ventas completas).
     Devuelve el escalón alcanzado, el premio en $ y, por escalón, avance, faltante, media diaria necesaria
     con los días de venta que quedan y si la proyección al ritmo actual lo alcanza.
     """
-    escalas = N.ESCALAS_FACTURACION[perfil]
+    cfg = cfg or _CFG0
+    escalas, premios = cfg.escalas[perfil], cfg.premios
     transc, rest = dias_transcurridos(fecha), dias_restantes(fecha)
     proyeccion = vendido / transc * (transc + rest) if transc else 0.0
     escalones = []
-    for i, (obj, premio) in enumerate(zip(escalas, N.PREMIOS_ESCALON), start=1):
+    for i, (obj, premio) in enumerate(zip(escalas, premios), start=1):
         falta = max(obj - vendido, 0.0)
         escalones.append({
             "escalon": i, "objetivo": obj, "premio": premio, "objetivo_diario": objetivo_diario(obj),
@@ -76,7 +78,7 @@ def evaluar_facturacion(vendido: float, perfil: str, fecha: date) -> dict:
     return {
         "perfil": perfil, "vendido": vendido, "fecha": fecha, "dias_transcurridos": transc, "dias_restantes": rest,
         "ritmo_diario": vendido / transc if transc else 0.0, "proyeccion": proyeccion,
-        "escalon": escalon, "premio": N.PREMIOS_ESCALON[escalon - 1] if escalon else 0,
+        "escalon": escalon, "premio": premios[escalon - 1] if escalon else 0,
         "premio_proyectado": max([e["premio"] for e in escalones if e["proyeccion_alcanza"]], default=0),
         "siguiente": escalones[escalon] if escalon < len(escalones) else None, "escalones": escalones,
     }

@@ -22,6 +22,7 @@ from streamlit.errors import StreamlitAPIException  # noqa: E402
 
 from barras import capa_proyeccion, leyenda_avance, x_texto  # noqa: E402
 from estilo import AZUL, GRIS_MARCA, TXT, esc, mostrar_logo, texto_grande  # noqa: E402
+from sigma_conn import config_objetivos as CO  # noqa: E402
 from sigma_conn import negocio as N  # noqa: E402
 from sigma_conn import objetivos as O  # noqa: E402
 from sigma_conn import tableros as TB  # noqa: E402
@@ -82,7 +83,8 @@ ultimo = TB.ultimo_dia_con_ventas(ventas_mes)
 corte = sb.date_input("Corte (día inclusive)", value=min(ultimo or inicio_m, fin_m), min_value=inicio_m, max_value=fin_m)
 
 # ----------------------------------------------------------------------------- facturación (solo este vendedor)
-tabla_total, _ = TB.facturacion_vendedores(ventas_mes, dim_art, dim_vend, corte)
+CFG = CO.config_del_mes(mes)
+tabla_total, _ = TB.facturacion_vendedores(ventas_mes, dim_art, dim_vend, corte, CFG)
 fila = tabla_total[tabla_total["vendedor_id"] == VID]
 if fila.empty:
     st.error("Tu usuario no tiene una escala de facturación asociada. Avisar al administrador.")
@@ -108,8 +110,8 @@ st.markdown(f"### {f['estado_txt']}")
 
 if f["siguiente_escalon"] == f["siguiente_escalon"] and f["siguiente_escalon"] is not None:
     sig = int(f["siguiente_escalon"])
-    premio_sig = N.PREMIOS_ESCALON[sig - 1]
-    premio_hoy = N.PREMIOS_ESCALON[sig - 2] if sig > 1 else 0
+    premio_sig = CFG.premios[sig - 1]
+    premio_hoy = CFG.premios[sig - 2] if sig > 1 else 0
     falta = TB.fmt_millones(f["faltante_siguiente"])
     if premio_hoy:
         incentivo = (f"🎯 Te faltan <b>{falta}</b> para el escalón {sig}: tu premio sube de {TB.fmt_pesos(premio_hoy)} "
@@ -123,12 +125,12 @@ if f["siguiente_escalon"] == f["siguiente_escalon"] and f["siguiente_escalon"] i
         st.caption(esc(f"Para llegar necesitás vender {TB.fmt_millones(f['media_necesaria'], 2)} por día de venta "
                        f"(tu ritmo actual es {TB.fmt_millones(f['ritmo_diario'], 2)} por día)."))
 else:
-    texto_grande(f"🏆 ¡Llegaste al último escalón! Tu premio es de <b>{TB.fmt_pesos(N.PREMIOS_ESCALON[-1])}</b>.")
+    texto_grande(f"🏆 ¡Llegaste al último escalón! Tu premio es de <b>{TB.fmt_pesos(CFG.premios[-1])}</b>.")
 
 escalones = pd.DataFrame({
     "escalon": [f"Escalón {i}" for i in (1, 2, 3)], "corto": ["E1", "E2", "E3"],
     "objetivo_m": [f["objetivo_esc1"] / 1e6, f["objetivo_esc2"] / 1e6, f["objetivo_esc3"] / 1e6],
-    "premio_txt": [TB.fmt_pesos(p) for p in N.PREMIOS_ESCALON],
+    "premio_txt": [TB.fmt_pesos(p) for p in CFG.premios],
 })
 escalones["objetivo_txt"] = escalones["objetivo_m"].map(lambda x: f"{x:,.0f} M$".replace(",", "."))
 escalones["etiqueta"] = escalones["escalon"] + " · " + escalones["objetivo_txt"]
@@ -155,7 +157,7 @@ tab_ritmo, tab_cob, tab_mv, tab_canal = _tabs["Mi ritmo"], _tabs["Mi cobertura"]
 
 # ----------------------------------------------------------------------------- ritmo
 with tab_ritmo:
-    rit = TB.ritmo_mes(ventas_mes, dim_art, corte, [VID])
+    rit = TB.ritmo_mes(ventas_mes, dim_art, corte, [VID], CFG)
     nombres = {"acumulado": "Vendido acumulado", "esc1": "Ruta escalón 1", "esc2": "Ruta escalón 2", "esc3": "Ruta escalón 3"}
     largo = rit.melt(id_vars="fecha", value_vars=list(nombres), var_name="clave", value_name="monto").dropna()
     largo["serie"] = largo["clave"].map(nombres)

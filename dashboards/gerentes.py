@@ -23,6 +23,7 @@ from streamlit.errors import StreamlitAPIException  # noqa: E402
 
 from barras import capa_proyeccion, leyenda_avance, x_texto  # noqa: E402
 from estilo import esc, mostrar_logo  # noqa: E402
+from sigma_conn import config_objetivos as CO  # noqa: E402
 from sigma_conn import negocio as N  # noqa: E402
 from sigma_conn import tableros as TB  # noqa: E402
 from sigma_conn.store import Store  # noqa: E402
@@ -145,7 +146,8 @@ except FileNotFoundError:
 corte_b = sb.date_input("Corte del bimestre (día inclusive)", value=min(ultimo_b or ini_bim, fin_bim), min_value=ini_bim, max_value=fin_bim)
 sb.divider()
 
-tabla_total, resumen = TB.facturacion_vendedores(ventas, dim_art, dim_vend, corte)
+CFG = CO.config_del_mes(CO.mes_de(corte))      # escalas, premios y perfiles vigentes del mes (editables en la pestaña Objetivos)
+tabla_total, resumen = TB.facturacion_vendedores(ventas, dim_art, dim_vend, corte, CFG)
 supervisores = sorted(s for s in tabla_total["supervisor"].unique() if s)
 if _sesion.get("rol") != "gerente":      # Costa SLA y similares: solo los ve gerencia (los demás filtros y pestañas salen de `tabla`)
     supervisores = [s for s in supervisores if s not in N.SUPERVISORES_SOLO_GERENCIA]
@@ -215,8 +217,8 @@ s1.metric(TB.ESTADO_TXT["verde"], int(ne.get("verde", 0)), help="Ya alcanzaron a
 s2.metric(TB.ESTADO_TXT["amarillo"], int(ne.get("amarillo", 0)), help="Todavía no lo alcanzaron, pero al ritmo actual llegan al escalón 1.")
 s3.metric(TB.ESTADO_TXT["rojo"], int(ne.get("rojo", 0)), help="Al ritmo actual no llegan al escalón 1.")
 
-tab_fact, tab_ritmo, tab_cob, tab_mv, tab_cf, tab_11t, tab_canal, tab_escalas, tab_usr = st.tabs(
-    ["Facturación", "Ritmo", "Cobertura", "Mis Ventas", "Club Faro", "11 Titulares", "Por canal", "Escalas y premios", "Usuarios"])
+tab_fact, tab_ritmo, tab_cob, tab_mv, tab_cf, tab_11t, tab_canal, tab_escalas, tab_obj, tab_usr = st.tabs(
+    ["Facturación", "Ritmo", "Cobertura", "Mis Ventas", "Club Faro", "11 Titulares", "Por canal", "Escalas y premios", "Objetivos", "Usuarios"])
 
 # ----------------------------------------------------------------------------- pestaña facturación
 with tab_fact:
@@ -293,7 +295,7 @@ with tab_ritmo:
     opciones.update({f"{r.vendedor} ({r.vendedor_id})": [r.vendedor_id] for r in tabla.itertuples()})
     elegido = st.selectbox("Ver", list(opciones))
     ids = opciones[elegido] or list(tabla["vendedor_id"])
-    rit = TB.ritmo_mes(ventas, dim_art, corte, ids)
+    rit = TB.ritmo_mes(ventas, dim_art, corte, ids, CFG)
     nombres = {"acumulado": "Vendido acumulado", "esc1": "Ruta escalón 1", "esc2": "Ruta escalón 2", "esc3": "Ruta escalón 3"}
     largo = rit.melt(id_vars="fecha", value_vars=list(nombres), var_name="clave", value_name="monto").dropna()
     largo["serie"] = largo["clave"].map(nombres)
@@ -629,16 +631,20 @@ with tab_canal:
 # ----------------------------------------------------------------------------- pestaña escalas
 with tab_escalas:
     tabla_esc = pd.DataFrame([{"Perfil": p, "Escalón 1 (M$)": e[0] / 1e6, "Escalón 2 (M$)": e[1] / 1e6, "Escalón 3 (M$)": e[2] / 1e6,
-                         "Vendedores": ", ".join(v for v, pp in sorted(N.VENDEDOR_PERFIL.items()) if pp == p)}
-                        for p, e in N.ESCALAS_FACTURACION.items()])
+                         "Vendedores": ", ".join(v for v, pp in sorted(CFG.vendedor_perfil.items()) if pp == p)}
+                        for p, e in CFG.escalas.items()])
     st.dataframe(tabla_esc, hide_index=True, column_config={c: st.column_config.NumberColumn(format="%.0f")
                                                      for c in ("Escalón 1 (M$)", "Escalón 2 (M$)", "Escalón 3 (M$)")})
     st.write("Premio por escalón alcanzado: " + esc(" · ".join(
-        f"escalón {i}: {TB.fmt_pesos(p)}" for i, p in enumerate(N.PREMIOS_ESCALON, start=1))) + ".")
-    st.caption("Escalas de venta neta mensual sin IVA por vendedor, vigentes para septiembre y octubre de 2026. "
+        f"escalón {i}: {TB.fmt_pesos(p)}" for i, p in enumerate(CFG.premios, start=1))) + ".")
+    st.caption("Escalas de venta neta mensual sin IVA por vendedor, vigentes en el mes elegido (se editan en la pestaña Objetivos). "
                "El objetivo diario es el mensual dividido 26 (se vende de lunes a sábado).")
 
 # ----------------------------------------------------------------------------- pestaña usuarios (alta, baja y clave de vendedores)
+with tab_obj:
+    import objetivos_ui
+    objetivos_ui.panel_objetivos(_sesion, {str(r.vendedor_id): str(r.nombre).title() for r in dim_vend.drop_duplicates("vendedor_id").itertuples()} if len(dim_vend) else {})
+
 with tab_usr:
     import usuarios_ui
     _nombres_sigma = ({str(r.vendedor_id): str(r.nombre).title() for r in dim_vend.drop_duplicates("vendedor_id").itertuples()}
