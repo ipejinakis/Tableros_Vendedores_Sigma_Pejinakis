@@ -21,7 +21,7 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 from streamlit.errors import StreamlitAPIException  # noqa: E402
 
-from barras import capa_proyeccion, leyenda_avance, x_texto  # noqa: E402
+from barras import capa_proyeccion, leyenda_avance, tablas_resumen_mis_ventas, x_texto  # noqa: E402
 from estilo import esc, mostrar_logo  # noqa: E402
 from sigma_conn import config_bimestre as CB  # noqa: E402
 from sigma_conn import config_campanas as CS  # noqa: E402
@@ -486,6 +486,8 @@ with tab_mv:
             st.caption("La barra es el avance sobre el target; la marca gris es el avance esperado a hoy. Texto: logrado / target. "
                        "Un vendedor aparece solo en las campañas donde tiene target (el 111 no tiene).")
             st.caption(TB.AYUDA_SEMAFORO_AVANCE)
+            tablas_resumen_mis_ventas(mv)
+            st.markdown("**Detalle por campaña**")
             tabla_mv = g.rename(columns={"vendedor": "Vendedor", "panel": "Campaña", "estado_txt": "Estado"})
             tabla_mv = tabla_mv.assign(**{"Logrado": g["logrado"], "Target": g["target"], "Avance (%)": g["avance"] * 100})
             st.dataframe(tabla_mv[["Vendedor", "Campaña", "Estado", "Logrado", "Target", "Avance (%)"]].sort_values(["Campaña", "Vendedor"]),

@@ -339,6 +339,33 @@ def mis_ventas_vendedores(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_
     return pd.DataFrame(filas)
 
 
+RESUMEN_MV_COLUMNAS = ["vendedor_id", "vendedor", "objetivo", "avance", "pct_avance", "proyectado", "pct_proyeccion", "media_necesaria"]
+
+
+def resumen_mis_ventas(mv: pd.DataFrame, tipo: str) -> pd.DataFrame:
+    """Resumen de Mis Ventas por vendedor para un tipo (`COBERTURA` = clientes, `VOLUMEN` = unidades).
+
+    Suma las campañas de cada vendedor: `objetivo` = suma de los targets; `avance` = suma de lo logrado; `proyectado` = suma de
+    lo que cada campaña llegaría a lograr al cierre del bimestre al ritmo actual (logrado ÷ avance esperado a hoy; si todavía no
+    hay avance esperado, lo logrado). `pct_avance` = avance ÷ objetivo y `pct_proyeccion` = proyectado ÷ objetivo (fracciones; NaN sin
+    objetivo). `media_necesaria` = avance actual ÷ objetivo (definición de Juan, 2026-10-09: es el mismo número que `pct_avance`).
+    Acepta la tabla de `mis_ventas_vendedores` (columna `target`) o la de la vista del vendedor (renombrada a `objetivo`)."""
+    d = mv[mv["tipo"] == tipo]
+    if d.empty:
+        return pd.DataFrame(columns=RESUMEN_MV_COLUMNAS)
+    col_obj = "target" if "target" in d.columns else "objetivo"
+    esp = pd.to_numeric(d["esperado_pct"], errors="coerce")
+    d = d.assign(_obj=pd.to_numeric(d[col_obj], errors="coerce"), _lg=pd.to_numeric(d["logrado"], errors="coerce"))
+    d["_proy"] = d["_lg"].where(~(esp > 0), d["_lg"] / esp.where(esp > 0, 1.0))
+    g = d.groupby(["vendedor_id", "vendedor"], as_index=False, sort=False).agg(
+        objetivo=("_obj", "sum"), avance=("_lg", "sum"), proyectado=("_proy", "sum"))
+    hay = g["objetivo"] > 0
+    g["pct_avance"] = (g["avance"] / g["objetivo"]).where(hay)
+    g["pct_proyeccion"] = (g["proyectado"] / g["objetivo"]).where(hay)
+    g["media_necesaria"] = g["pct_avance"]
+    return g[RESUMEN_MV_COLUMNAS].sort_values("vendedor").reset_index(drop=True)
+
+
 def ventas_sin_escala(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, dim_vendedor: pd.DataFrame, corte: date,
                       vendedor_ids) -> pd.DataFrame:
     """Venta neta del mes hasta `corte` por vendedor (y por canal) para vendedores SIN escala de preventa.

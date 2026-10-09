@@ -20,7 +20,7 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 from streamlit.errors import StreamlitAPIException  # noqa: E402
 
-from barras import capa_proyeccion, leyenda_avance, x_texto  # noqa: E402
+from barras import capa_proyeccion, leyenda_avance, tablas_resumen_mis_ventas, x_texto  # noqa: E402
 from estilo import AZUL, GRIS_MARCA, TXT, esc, mostrar_logo, texto_grande  # noqa: E402
 from sigma_conn import config_bimestre as CB  # noqa: E402
 from sigma_conn import config_campanas as CS  # noqa: E402
@@ -257,6 +257,8 @@ with tab_mv:
                      "volumen = unidades vendidas (las notas de crédito restan).")
             leyenda_avance()
             st.altair_chart(_barras_avance(mv, "panel", list(mv.sort_values(["campana", "tipo"])["panel"])))
+            tablas_resumen_mis_ventas(mv)
+            st.markdown("**Detalle por campaña**")
             st.dataframe(mv.assign(**{"Avance (%)": mv["avance"] * 100})[["panel", "logrado", "objetivo", "Avance (%)", "estado_txt"]]
                          .rename(columns={"panel": "Campaña", "logrado": "Logrado", "objetivo": "Objetivo", "estado_txt": "Estado"}),
                          hide_index=True, column_config={"Logrado": st.column_config.NumberColumn(format="%.0f"),

@@ -37,3 +37,28 @@ def leyenda_avance(sin_objetivo: bool = False) -> None:
         f'margin-right:.4rem;vertical-align:-1px;background:{c};opacity:{o}"></span>{t}</span>' for c, o, t in items)
     st.markdown(f'<div style="display:flex;flex-wrap:wrap;gap:.35rem 1.4rem;font-size:.85rem;margin:.1rem 0 .75rem 0">{chips}</div>',
                 unsafe_allow_html=True)
+
+
+def tablas_resumen_mis_ventas(mv) -> None:
+    """Dos tablas (cobertura en clientes y volumen en unidades) con el resumen de Mis Ventas por vendedor.
+    `mv`: tabla de `mis_ventas_vendedores` (ya filtrada a los vendedores que se muestran)."""
+    import streamlit as st
+
+    nombres = {"COBERTURA": ("Cobertura (clientes)", "clientes"), "VOLUMEN": ("Volumen (unidades)", "unidades")}
+    for tipo, (titulo, unidad) in nombres.items():
+        r = TB.resumen_mis_ventas(mv, tipo)
+        if r.empty:
+            continue
+        st.markdown(f"**Resumen por vendedor · {titulo}**")
+        t = r.rename(columns={"vendedor": "Vendedor", "objetivo": "Objetivo", "avance": "Avance actual", "pct_avance": "% avance actual",
+                              "proyectado": "Proyectado", "pct_proyeccion": "% proyección", "media_necesaria": "Media necesaria"})
+        for c in ("% avance actual", "% proyección", "Media necesaria"):
+            t[c] = t[c] * 100
+        st.dataframe(t[["Vendedor", "Objetivo", "Avance actual", "% avance actual", "Proyectado", "% proyección", "Media necesaria"]],
+                     hide_index=True, use_container_width=True, column_config={
+                         "Objetivo": st.column_config.NumberColumn(format="%.0f", help=f"Suma de los objetivos de sus campañas ({unidad})."),
+                         "Avance actual": st.column_config.NumberColumn(format="%.0f", help=f"Suma de lo logrado en sus campañas ({unidad})."),
+                         "% avance actual": st.column_config.NumberColumn(format="%.0f%%"),
+                         "Proyectado": st.column_config.NumberColumn(format="%.0f", help="Suma de lo que cada campaña llegaría a lograr al cierre del bimestre al ritmo actual."),
+                         "% proyección": st.column_config.NumberColumn(format="%.0f%%"),
+                         "Media necesaria": st.column_config.NumberColumn(format="%.0f%%", help="Avance actual ÷ objetivo.")})
