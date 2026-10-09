@@ -443,3 +443,10 @@ def test_fmt_actualizado():
     assert TB.fmt_actualizado({"written_at": "2026-10-07T11:24:10-03:00"}) == "07/10/2026 11:24"
     assert TB.fmt_actualizado({"written_at": "2026-10-07T09:13:52"}) == "07/10/2026 09:13"
     assert TB.fmt_actualizado(None) == "s/d" and TB.fmt_actualizado({}) == "s/d" and TB.fmt_actualizado({"written_at": "xx"}) == "s/d"
+
+
+def test_costa_sla_solo_para_gerencia():
+    assert "COSTA SLA" in N.SUPERVISORES.values()
+    assert "COSTA SLA" in N.SUPERVISORES_SOLO_GERENCIA
+    # el resto de los supervisores sigue visible para el rol supervisor
+    assert "AMAYA MAURO" not in N.SUPERVISORES_SOLO_GERENCIA and "BULDURINI NATALIA" not in N.SUPERVISORES_SOLO_GERENCIA

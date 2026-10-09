@@ -54,6 +54,9 @@ SUPERVISOR_VENDEDOR: dict[str, str] = {
     **{v: "3" for v in ("102", "110", "111", "114", "117", "119")},
 }
 
+# Supervisores que solo ve el rol gerente (Juan, 2026-10-09): para los supervisores no aparecen en el filtro ni en ninguna pestaña.
+SUPERVISORES_SOLO_GERENCIA: tuple[str, ...] = ("COSTA SLA",)
+
 # Supervisores de SIGMA cuyos vendedores NO tienen escala de preventa: solo se muestran a los gerentes, como venta sin escalones
 # (Juan, 2026-10-07: GERENCIA SLA = 124 GERENCIA SALTA y 125 WILLY JESUS-SALTA).
 SUPERVISOR_SIN_ESCALA: dict[str, tuple[str, ...]] = {"GERENCIA SLA": ("124", "125")}

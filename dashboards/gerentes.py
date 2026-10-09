@@ -146,6 +146,8 @@ sb.divider()
 
 tabla_total, resumen = TB.facturacion_vendedores(ventas, dim_art, dim_vend, corte)
 supervisores = sorted(s for s in tabla_total["supervisor"].unique() if s)
+if _sesion.get("rol") != "gerente":      # Costa SLA y similares: solo los ve gerencia (los demás filtros y pestañas salen de `tabla`)
+    supervisores = [s for s in supervisores if s not in N.SUPERVISORES_SOLO_GERENCIA]
 # Supervisores sin escala de preventa (p. ej. GERENCIA SLA): solo los ven los gerentes, como venta sin escalones
 extra_sup = sorted(N.SUPERVISOR_SIN_ESCALA) if _sesion.get("rol") == "gerente" else []
 sup_todos = sb.multiselect("Supervisor", supervisores + extra_sup, default=supervisores)

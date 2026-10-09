@@ -17,7 +17,7 @@ El túnel sale desde el servidor hacia Cloudflare: **no se abre ningún puerto d
    (hace falta haber subido antes el código con `bash deploy/subir.sh n8npeji`).
 6. En el panel, pestaña **Public Hostname** del túnel: Subdomain `tableros`, Domain `pejinakiscontrol.com`, Service **HTTP** `localhost:8510`.
 7. **Access**: Zero Trust → Access → Applications → Add → Self-hosted. Application domain `tableros.pejinakiscontrol.com`. Política **Allow** → Include → **Emails** (lista) y método de login **One-time PIN**. Duración de sesión larga (por ejemplo 1 semana a 1 mes) para que el vendedor no pida el código todos los días. **Primero cargar solo 2–3 mails de prueba (el tuyo y uno más)**.
-8. **Probar** con un celular por datos móviles (sin Tailscale): entra la pantalla de Cloudflare, llega el código al mail, después aparece el login de la app. Verificar que un mail que NO está en la lista no puede pasar, que un vendedor ve solo lo suyo y que F5 mantiene la sesión.
+8. **Probar** con un celular por datos móviles (sin Tailscale): entra la pantalla de Cloudflare, llega el código al mail, después aparece el login de la app. Verificar que un mail que NO está en la lista no puede pasar, que un vendedor ve solo lo suyo y que F5 mantiene la sesión.git 
 9. Recién entonces cargar el resto de los mails. Salen de `python scripts/admin/listar_vendedores.py --csv` (columna `email`). Es dato personal: no va al repo ni a los docs. Verificar que cada vendedor recibe el código (mirar spam).
 
 ## Altas y bajas
