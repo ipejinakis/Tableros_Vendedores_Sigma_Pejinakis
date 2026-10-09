@@ -97,7 +97,7 @@ def panel_objetivos(sesion: dict, nombres_sigma: dict, hoy: date | None = None) 
                     "vendedor_perfil": dict(cfg.vendedor_perfil),
                 }
                 guardada = store.guardar(actor, mes, nuevo, motivo, version_base=cfg.version, hoy=hoy)
-                A.Auditoria(A.ruta_auditoria(A.ruta_usuarios())).registrar("objetivos_cambiados", usuario=actor, mes=mes)
+                auth_ui._auditoria(A.UsuariosStore(A.ruta_usuarios())).registrar("objetivos_cambiados", actor, auth_ui._ip_cliente(), extra=f"facturacion {mes}")
                 st.session_state["_obj_ok"] = f"Guardado para {mes}."
                 st.cache_data.clear()
                 st.rerun()
