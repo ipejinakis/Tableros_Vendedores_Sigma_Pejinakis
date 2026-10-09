@@ -454,9 +454,6 @@ with tab_mv:
                 avance_pct=mv["avance"].clip(upper=1.5), avance_txt=(mv["avance"] * 100).map("{:.0f}%".format),
                 esperado_txt=mv["esperado_valor"].map("{:,.0f}".format).str.replace(",", "."),
                 faltan_txt=mv["faltan"].map("{:,.0f}".format).str.replace(",", "."))
-            orden_v = list(dict.fromkeys(mv.sort_values("vendedor")["vendedor"]))
-            orden_p = list(dict.fromkeys(mv.sort_values(["campana", "tipo"])["panel"]))
-            yv = alt.Y("vendedor:N", sort=orden_v, title=None)
             xv = alt.X("avance_pct:Q", scale=alt.Scale(domain=[0, 1.7]),
                        axis=alt.Axis(format="%", values=[0, 0.5, 1.0, 1.5], title="Avance sobre el target"))
             color_m = alt.Color("estado_txt:N", title="Estado", sort=list(TB.ESTADO_AVANCE_TXT.values()),
@@ -467,12 +464,25 @@ with tab_mv:
                     alt.Tooltip("etiqueta:N", title="Logrado / target"), alt.Tooltip("avance_txt:N", title="Avance"),
                     alt.Tooltip("esperado_txt:N", title="Esperado a hoy"), alt.Tooltip("faltan_txt:N", title="Faltan"),
                     alt.Tooltip("estado_txt:N", title="Estado"), alt.Tooltip("proy_txt:N", title="Proyección al cierre")]
-            b_m = alt.Chart().mark_bar(size=12, cornerRadiusEnd=4).encode(y=yv, x=xv, color=color_m, tooltip=tips)
-            p_m = capa_proyeccion(yv, xv, 12)
-            t_m = alt.Chart().mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=yv, x=x_texto(xv), text="etiqueta:N")
-            e_m = alt.Chart().mark_tick(color=GRIS_MARCA, thickness=2, size=18).encode(y=yv, x=alt.X("esperado_pct:Q"))
-            st.altair_chart(alt.layer(b_m, p_m, t_m, e_m, data=g).resolve_scale(color="independent").properties(width=330, height=22 * len(orden_v) + 10).facet(
-                facet=alt.Facet("panel:N", sort=orden_p, title=None, header=alt.Header(labelLimit=330)), columns=2, spacing=24))
+
+            def _grafico_campana(gp: pd.DataFrame, orden: list, con_nombres: bool) -> alt.LayerChart:
+                eje = alt.Axis(labelLimit=200) if con_nombres else alt.Axis(labels=False, ticks=False)
+                yv = alt.Y("vendedor:N", sort=orden, title=None, axis=eje)
+                b_m = alt.Chart().mark_bar(size=12, cornerRadiusEnd=4).encode(y=yv, x=xv, color=color_m, tooltip=tips)
+                p_m = capa_proyeccion(yv, xv, 12)
+                t_m = alt.Chart().mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=yv, x=x_texto(xv), text="etiqueta:N")
+                e_m = alt.Chart().mark_tick(color=GRIS_MARCA, thickness=2, size=18).encode(y=yv, x=alt.X("esperado_pct:Q"))
+                return alt.layer(b_m, p_m, t_m, e_m, data=gp).resolve_scale(color="independent").properties(
+                    width=330, height=22 * len(orden) + 10, title=str(gp["panel"].iloc[0]))
+
+            # una fila por campaña: cobertura a la izquierda y volumen a la derecha; si tiene uno solo, va solo en su fila
+            filas_mv = []
+            for camp in dict.fromkeys(g.sort_values(["campana", "tipo"])["campana"]):
+                gc = g[g["campana"] == camp]
+                orden_c = list(dict.fromkeys(gc.sort_values("vendedor")["vendedor"]))
+                graficos = [_grafico_campana(gc[gc["tipo"] == t], orden_c, i == 0) for i, t in enumerate(sorted(gc["tipo"].unique()))]
+                filas_mv.append(alt.hconcat(*graficos, spacing=24))
+            st.altair_chart(alt.vconcat(*filas_mv, spacing=30))
             st.caption("La barra es el avance sobre el target; la marca gris es el avance esperado a hoy. Texto: logrado / target. "
                        "Un vendedor aparece solo en las campañas donde tiene target (el 111 no tiene).")
             st.caption(TB.AYUDA_SEMAFORO_AVANCE)
