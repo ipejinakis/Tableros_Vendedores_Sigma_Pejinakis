@@ -20,6 +20,7 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 from streamlit.errors import StreamlitAPIException  # noqa: E402
 
+from barras import capa_proyeccion, leyenda_avance, x_texto  # noqa: E402
 from estilo import AZUL, GRIS_MARCA, TXT, esc, mostrar_logo, texto_grande  # noqa: E402
 from sigma_conn import negocio as N  # noqa: E402
 from sigma_conn import objetivos as O  # noqa: E402
@@ -177,7 +178,7 @@ with tab_ritmo:
 
 
 def _barras_avance(df: pd.DataFrame, y_col: str, orden_y: list[str]) -> alt.LayerChart:
-    g = df.assign(
+    g = TB.agregar_proyeccion(df).assign(
         etiqueta=df["estado_txt"].str[0] + " " + df["logrado"].map("{:,.0f}".format).str.replace(",", ".") + " / "
         + df["objetivo"].map("{:,.0f}".format).str.replace(",", "."),
         avance_pct=df["avance"].clip(upper=1.5), avance_txt=(df["avance"] * 100).map("{:.0f}%".format),
@@ -189,14 +190,15 @@ def _barras_avance(df: pd.DataFrame, y_col: str, orden_y: list[str]) -> alt.Laye
     col = alt.Color("estado_txt:N", title="Estado", sort=list(TB.ESTADO_AVANCE_TXT.values()),
                     scale=alt.Scale(domain=list(TB.ESTADO_AVANCE_TXT.values()),
                                     range=[TB.ESTADO_COLOR[e] for e in TB.ESTADO_AVANCE_TXT]),
-                    legend=alt.Legend(orient="top"))
+                    legend=None)
     tips = [alt.Tooltip(f"{y_col}:N", title="Objetivo"), alt.Tooltip("etiqueta:N", title="Logrado / objetivo"),
             alt.Tooltip("avance_txt:N", title="Avance"), alt.Tooltip("esperado_txt:N", title="Esperado a hoy"),
-            alt.Tooltip("faltan_txt:N", title="Faltan"), alt.Tooltip("estado_txt:N", title="Estado")]
+            alt.Tooltip("faltan_txt:N", title="Faltan"), alt.Tooltip("estado_txt:N", title="Estado"), alt.Tooltip("proy_txt:N", title="Proyección al cierre")]
     barras = alt.Chart(g).mark_bar(size=18, cornerRadiusEnd=4).encode(y=yv, x=xv, color=col, tooltip=tips)
-    texto = alt.Chart(g).mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=yv, x=xv, text="etiqueta:N")
+    proy = capa_proyeccion(yv, xv, 18, data=g)
+    texto = alt.Chart(g).mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=yv, x=x_texto(xv), text="etiqueta:N")
     esperado = alt.Chart(g).mark_tick(color=GRIS_MARCA, thickness=2, size=26).encode(y=yv, x=alt.X("esperado_pct:Q"))
-    return (barras + texto + esperado).properties(height=60 * len(orden_y) + 40, width="container")
+    return alt.layer(barras, proy, texto, esperado).resolve_scale(color="independent").properties(height=60 * len(orden_y) + 40, width="container")
 
 
 # ----------------------------------------------------------------------------- cobertura
@@ -213,9 +215,10 @@ with tab_cob:
             tc = tc.rename(columns={"clientes": "logrado"}).assign(esperado_valor=lambda d: d["esperado_clientes"])
             st.write(f"Clientes distintos que te compraron cada categoría en el bimestre {inicio_b:%d/%m} – {fin_b:%d/%m/%Y}. "
                      f"Avance esperado a hoy: **{rc['esperado_pct'] * 100:.0f}%**.")
+            leyenda_avance()
             st.altair_chart(_barras_avance(tc, "categoria", list(N.CATEGORIAS_COBERTURA)))
-            st.caption("La barra es tu avance sobre el objetivo; la marca gris es lo que deberías llevar a hoy. "
-                       "✔ en ritmo · ▲ algo atrasado (80 % a 100 % de lo esperado) · ✖ atrasado.")
+            st.caption("La barra es tu avance sobre el objetivo; la marca gris es lo que deberías llevar a hoy. " +
+                       TB.AYUDA_SEMAFORO_AVANCE)
             st.dataframe(tc.assign(**{"Avance (%)": tc["avance"] * 100})[["categoria", "logrado", "objetivo", "Avance (%)", "estado_txt"]]
                          .rename(columns={"categoria": "Categoría", "logrado": "Clientes con compra", "objetivo": "Objetivo",
                                           "estado_txt": "Estado"}), hide_index=True,
@@ -238,6 +241,7 @@ with tab_mv:
                 st.warning("Resultados provisorios: todavía no están confirmados los artículos de cada campaña.")
             st.write(f"Campañas del bimestre {inicio_b:%d/%m} – {fin_b:%d/%m/%Y}. Cobertura = clientes distintos que compraron; "
                      "volumen = unidades vendidas (las notas de crédito restan).")
+            leyenda_avance()
             st.altair_chart(_barras_avance(mv, "panel", list(mv.sort_values(["campana", "tipo"])["panel"])))
             st.dataframe(mv.assign(**{"Avance (%)": mv["avance"] * 100})[["panel", "logrado", "objetivo", "Avance (%)", "estado_txt"]]
                          .rename(columns={"panel": "Campaña", "logrado": "Logrado", "objetivo": "Objetivo", "estado_txt": "Estado"}),
@@ -259,14 +263,15 @@ if _tiene_cf:
                 st.warning("Resultados provisorios: todavía no están confirmados los artículos de cada línea.")
             st.write(f"Clientes que te compraron cada línea de Club Faro en el bimestre {inicio_b:%d/%m} – {fin_b:%d/%m/%Y}. "
                      f"Con 1 unidad el cliente ya suma. Avance esperado a hoy: **{rcf['esperado_pct'] * 100:.0f}%**.")
+            leyenda_avance()
             st.altair_chart(_barras_avance(cf, "panel", [i["nombre"] for i in N.CLUB_FARO_LINEAS.values() if i["nombre"] in set(cf["panel"])]))
             faltan_txt = " · ".join(f"{r.panel}: <b>{r.faltan:,.0f}</b>".replace(",", ".") for r in cf.itertuples() if r.faltan > 0)
             if faltan_txt:
                 texto_grande(f"🎯 Te faltan clientes para cumplir: {faltan_txt}")
             else:
                 texto_grande("🏆 ¡Cumpliste todos tus objetivos de Club Faro!")
-            st.caption("La barra es tu avance sobre el objetivo; la marca gris es lo que deberías llevar a hoy. "
-                       "✔ en ritmo · ▲ algo atrasado (80 % a 100 % de lo esperado) · ✖ atrasado.")
+            st.caption("La barra es tu avance sobre el objetivo; la marca gris es lo que deberías llevar a hoy. " +
+                       TB.AYUDA_SEMAFORO_AVANCE)
             st.dataframe(cf.assign(**{"Avance (%)": cf["avance"] * 100})[["panel", "logrado", "objetivo", "faltan", "Avance (%)", "estado_txt"]]
                          .rename(columns={"panel": "Línea", "logrado": "Clientes con compra", "objetivo": "Objetivo",
                                           "faltan": "Faltan", "estado_txt": "Estado"}), hide_index=True,
@@ -290,7 +295,7 @@ if _tiene_11t:
         st.caption("Un cliente cuenta en una línea si compró, en un mismo artículo de la línea, 1 caja cerrada (autoservicios y OP & VTK) "
                    "o 3 unidades iguales (tradicionales).")
         lin = rt["lineas"]
-        d = lin.assign(avance_pct=lin["avance"].clip(upper=1.5),
+        d = TB.agregar_proyeccion(lin.assign(esperado_pct=rt["esperado_pct"])).assign(avance_pct=lin["avance"].clip(upper=1.5),
                        etiqueta=lin["estado_txt"].str[0] + " " + lin["logrado"].astype(str) + " / " + lin["objetivo"].map("{:.0f}".format),
                        avance_txt=(lin["avance"] * 100).map("{:.0f}%".format), faltan_txt=lin["faltan"].map("{:.0f}".format),
                        esperado_txt=lin["esperado_valor"].map("{:.0f}".format), esperado_pct=rt["esperado_pct"])
@@ -300,16 +305,18 @@ if _tiene_11t:
                   axis=alt.Axis(format="%", values=[0, 0.5, 1.0, 1.5], title="Avance de la distribuidora sobre el objetivo"))
         col = alt.Color("estado_txt:N", title="Estado", sort=list(TB.ESTADO_CF_TXT.values()),
                         scale=alt.Scale(domain=list(TB.ESTADO_CF_TXT.values()), range=[TB.ESTADO_COLOR[e] for e in TB.ESTADO_CF_TXT]),
-                        legend=alt.Legend(orient="top"))
+                        legend=None)
         tips = [alt.Tooltip("nombre:N", title="Línea"), alt.Tooltip("etiqueta:N", title="Logrado / objetivo"),
                 alt.Tooltip("avance_txt:N", title="Avance"), alt.Tooltip("esperado_txt:N", title="Esperado a hoy"),
-                alt.Tooltip("faltan_txt:N", title="Faltan"), alt.Tooltip("estado_txt:N", title="Estado")]
+                alt.Tooltip("faltan_txt:N", title="Faltan"), alt.Tooltip("estado_txt:N", title="Estado"), alt.Tooltip("proy_txt:N", title="Proyección al cierre")]
         b = alt.Chart(d).mark_bar(size=16, cornerRadiusEnd=4).encode(y=y, x=x, color=col, tooltip=tips)
-        t = alt.Chart(d).mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=y, x=x, text="etiqueta:N")
+        pr = capa_proyeccion(y, x, 16, data=d)
+        t = alt.Chart(d).mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=y, x=x_texto(x), text="etiqueta:N")
         e = alt.Chart(d).mark_tick(color=GRIS_MARCA, thickness=2, size=20).encode(y=y, x=alt.X("esperado_pct:Q"))
-        st.altair_chart(alt.layer(b, t, e).properties(height=alt.Step(36)), use_container_width=True)
-        st.caption("La barra es el avance de toda la distribuidora; la marca gris es lo que debería llevar a hoy. "
-                   "✔ en ritmo · ▲ algo atrasado (80 % a 100 % de lo esperado) · ✖ atrasado.")
+        leyenda_avance(sin_objetivo=True)
+        st.altair_chart(alt.layer(b, pr, t, e).resolve_scale(color="independent").properties(height=alt.Step(36)), use_container_width=True)
+        st.caption("La barra es el avance de toda la distribuidora; la marca gris es lo que debería llevar a hoy. " +
+                   TB.AYUDA_SEMAFORO_AVANCE)
         tabla_v = pd.DataFrame({"Línea": lin["nombre"], "Tus clientes con compra": lin["linea"].map(aporte).fillna(0).astype(int),
                                 "Distribuidora": lin["logrado"], "Objetivo de la distribuidora": lin["objetivo"],
                                 "Faltan (distribuidora)": lin["faltan"], "Estado": lin["estado_txt"]})

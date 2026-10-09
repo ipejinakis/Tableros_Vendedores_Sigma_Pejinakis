@@ -204,9 +204,27 @@ def test_bimestre_de():
 
 
 def test_estado_avance_semaforo():
-    assert TB.estado_avance(0.5, 0.5) == "verde" and TB.estado_avance(1.0, 0.9) == "verde"
-    assert TB.estado_avance(0.45, 0.5) == "amarillo" and TB.estado_avance(0.39, 0.5) == "rojo"
-    assert TB.estado_avance(0.0, 0.0) == "verde"           # primer día: nadie va atrasado
+    # verde = ya cumplió; amarillo = la proyección cumple (lleva al menos lo esperado); rojo = la proyección no alcanza
+    assert TB.estado_avance(1.0, 0.9) == "verde" and TB.estado_avance(1.2, 1.0) == "verde" and TB.estado_avance(1.0, 1.0) == "verde"
+    assert TB.estado_avance(0.5, 0.5) == "amarillo" and TB.estado_avance(0.7, 0.4) == "amarillo" and TB.estado_avance(0.99, 0.5) == "amarillo"
+    assert TB.estado_avance(0.45, 0.5) == "rojo" and TB.estado_avance(0.39, 0.5) == "rojo" and TB.estado_avance(0.0, 0.3) == "rojo"
+    assert TB.estado_avance(0.0, 0.0) == "amarillo"        # primer día: todavía no hay ritmo para decir que no llega
+
+
+def test_proyeccion_avance_y_tramo_de_la_barra():
+    assert TB.proyeccion_avance(0.35, 0.5) == pytest.approx(0.7)       # lleva 35 % cuando debería llevar 50 %: cierra en 70 %
+    assert TB.proyeccion_avance(0.4, 0.0) == 0.4                        # sin avance esperado no se puede proyectar
+    df = pd.DataFrame({"avance": [0.35, 0.6, 1.2, 0.5, 0.2, 0.0], "esperado_pct": [0.5, 0.5, 0.5, 0.5, 0.5, float("nan")],
+                       "estado": ["rojo", "amarillo", "verde", "amarillo", "sin_objetivo", "sin_objetivo"]})
+    t = TB.agregar_proyeccion(df)
+    assert list(t["proy_txt"]) == ["70%", "120%", "240%", "100%", "—", "—"]
+    assert t.loc[0, "tramo_fin"] == pytest.approx(0.7)            # rojo: el tramo llega al 70 % (menos que el objetivo)
+    assert t.loc[1, "tramo_fin"] == pytest.approx(1.2)            # amarillo: pasa del 100 %
+    assert t.loc[2, "tramo_fin"] == pytest.approx(1.2)            # ya cumplió: no hay tramo (termina donde termina la barra)
+    assert t.loc[3, "tramo_fin"] == pytest.approx(1.0)
+    assert t.loc[4, "tramo_fin"] == pytest.approx(0.2) and t.loc[5, "tramo_fin"] == pytest.approx(0.0)   # sin objetivo: sin tramo
+    assert TB.agregar_proyeccion(pd.DataFrame({"avance": [0.1], "esperado_pct": [0.01], "estado": ["amarillo"]}))["tramo_fin"].iloc[0] == 1.5   # tope
+    assert TB.agregar_proyeccion(df.iloc[0:0]).empty
 
 
 def test_fraccion_esperada_por_dias_de_venta():
@@ -232,7 +250,7 @@ def test_cobertura_vendedores_tabla_y_resumen():
     assert len(tabla) == 6                                    # aparecen aunque no tengan clientes (101/HC)
     assert t.loc[("101", "BPC"), "clientes"] == 2 and t.loc[("101", "BPC"), "avance"] == pytest.approx(0.2)
     assert t.loc[("101", "BPC"), "estado"] == "rojo"          # 20 % contra 32 % esperado
-    assert t.loc[("101", "FOOD"), "estado"] == "verde"        # 40 % >= 32 %
+    assert t.loc[("101", "FOOD"), "estado"] == "amarillo"     # 40 % >= 32 % esperado: todavía no cumplió pero la proyección sí
     assert t.loc[("101", "HC"), "clientes"] == 0 and t.loc[("101", "HC"), "faltan"] == 4
     assert t.loc[("100", "BPC"), "clientes"] == 1 and t.loc[("101", "BPC"), "vendedor"] == "ARIAS DANIEL"
     # toda la distribuidora: BPC = c1, c2, c8 distintos = 3 de 100; FOOD = c1, c3 = 2 de 50
@@ -264,7 +282,7 @@ def test_mis_ventas_cobertura_y_volumen_por_campana():
     t = TB.mis_ventas_vendedores(ventas, art, VEND, obj, cfg, date(2026, 9, 1), date(2026, 10, 31), date(2026, 9, 20))
     t = t.set_index(["vendedor_id", "campana"])
     assert t.loc[("101", "DOVE_180ML"), "logrado"] == 2 and t.loc[("101", "DOVE_180ML"), "avance"] == pytest.approx(0.5)
-    assert t.loc[("101", "DOVE_180ML"), "estado"] == "verde"                      # 50 % >= 32 % esperado
+    assert t.loc[("101", "DOVE_180ML"), "estado"] == "amarillo"                   # 50 % >= 32 % esperado: en camino (no cumplió todavía)
     assert t.loc[("101", "HELLMANNS_SAB_LIV"), "logrado"] == 12 and t.loc[("101", "HELLMANNS_SAB_LIV"), "unidad"] == "unidades"
     assert t.loc[("101", "HELLMANNS_SAB_LIV"), "faltan"] == 12
     assert t.loc[("100", "REXONA_AERO"), "logrado"] == 0 and t.loc[("100", "REXONA_AERO"), "estado"] == "rojo"

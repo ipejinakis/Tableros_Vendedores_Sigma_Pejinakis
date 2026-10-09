@@ -164,12 +164,15 @@ def ritmo_mes(ventas: pd.DataFrame, dim_articulo: pd.DataFrame, corte: date,
 
 
 # ----------------------------------------------------------------------------- cobertura (BPC / FOOD / HC)
-# Semáforo de avance contra el ritmo esperado (propuesta aceptada por Juan, 2026-10-02):
-#   verde    = ya cumplió el objetivo, o va en o por encima del avance esperado a hoy
-#   amarillo = va entre el 80 % y el 100 % del avance esperado
-#   rojo     = va por debajo del 80 % del avance esperado
-UMBRAL_AMARILLO = 0.8
-ESTADO_AVANCE_TXT = {"verde": "✔ En ritmo", "amarillo": "▲ Algo atrasado", "rojo": "✖ Atrasado"}
+# Semáforo de avance (Juan, 2026-10-09; reemplaza al de 2026-10-02 que comparaba contra el 80 % del avance esperado):
+#   verde    = ya cumplió el objetivo
+#   amarillo = todavía no, pero la proyección al ritmo actual lo cumple al cierre del período
+#   rojo     = la proyección al ritmo actual no alcanza
+# Proyección = avance ÷ avance esperado a hoy (lineal por días de venta). Es la misma lógica del semáforo de facturación.
+ESTADO_AVANCE_TXT = {"verde": "✔ Objetivo cumplido", "amarillo": "▲ En camino al objetivo", "rojo": "✖ Proyección insuficiente"}
+AYUDA_SEMAFORO_AVANCE = ("Semáforo: ✔ objetivo cumplido; ▲ en camino = todavía no lo cumplió pero, al ritmo actual, lo cumple al cierre; "
+                         "✖ proyección insuficiente = al ritmo actual no llega. El tramo azul claro es lo que falta para llegar a la proyección al cierre.")
+PROYECCION_TXT = "Proyección al ritmo actual"
 ESTADO_CF_TXT = {**ESTADO_AVANCE_TXT, "sin_objetivo": "• Sin objetivo cargado"}   # Club Faro: vendedor de la base sin objetivo en el Excel
 
 
@@ -187,10 +190,35 @@ def cargar_ventas_rango(store: Store, desde: date, hasta: date) -> pd.DataFrame:
 
 
 def estado_avance(avance: float, esperado: float) -> str:
-    """`avance` = logrado / objetivo; `esperado` = fracción del objetivo que debería llevar a hoy (0–1)."""
-    if avance >= 1 or avance >= esperado:
+    """`avance` = logrado / objetivo; `esperado` = fracción del objetivo que debería llevar a hoy (0–1).
+    Verde si ya cumplió; amarillo si lleva al menos lo esperado (la proyección cumple); rojo si no."""
+    if avance >= 1:
         return "verde"
-    return "amarillo" if avance >= UMBRAL_AMARILLO * esperado else "rojo"
+    return "amarillo" if avance >= esperado else "rojo"
+
+
+def proyeccion_avance(avance: float, esperado: float) -> float:
+    """Avance proyectado al cierre del período si sigue al ritmo actual: avance ÷ avance esperado a hoy (lineal por días de venta).
+    Si todavía no hay avance esperado (primer día) no se puede proyectar y devuelve el avance actual."""
+    return avance / esperado if esperado and esperado > 0 else avance
+
+
+def agregar_proyeccion(df: pd.DataFrame, tope: float = 1.5) -> pd.DataFrame:
+    """Columnas para dibujar el tramo de proyección en las barras de avance (necesita `avance`, `esperado_pct` y `estado`).
+
+    `proyeccion_pct` (sin tope) y `proy_txt` ('120%' o '—'); `tramo_fin` = hasta dónde llega el tramo azul (tope `tope`, el mismo
+    de las barras): solo si todavía no cumplió (avance < 1), hay objetivo y la proyección supera lo logrado; si no, es el avance."""
+    d = df.copy()
+    av = pd.to_numeric(d["avance"], errors="coerce").fillna(0.0)
+    esp = pd.to_numeric(d["esperado_pct"], errors="coerce")
+    proy = pd.Series([proyeccion_avance(a, e) if pd.notna(e) else float("nan") for a, e in zip(av, esp)], index=d.index, dtype=float)
+    hay = proy.notna() & (d["estado"] != "sin_objetivo")
+    d["proyeccion_pct"] = proy.where(hay)
+    d["proy_txt"] = d["proyeccion_pct"].map(lambda p: "—" if pd.isna(p) else f"{p * 100:.0f}%")
+    aplica = hay & (av < 1) & (proy > av)
+    d["tramo_fin"] = av.clip(upper=tope).where(~aplica, proy.clip(upper=tope))
+    d["tramo"] = PROYECCION_TXT
+    return d
 
 
 def fraccion_esperada(inicio: date, fin: date, corte: date) -> float:

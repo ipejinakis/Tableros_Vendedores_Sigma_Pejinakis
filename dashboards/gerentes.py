@@ -21,6 +21,7 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 from streamlit.errors import StreamlitAPIException  # noqa: E402
 
+from barras import capa_proyeccion, leyenda_avance, x_texto  # noqa: E402
 from estilo import esc, mostrar_logo  # noqa: E402
 from sigma_conn import negocio as N  # noqa: E402
 from sigma_conn import tableros as TB  # noqa: E402
@@ -347,7 +348,8 @@ with tab_cob:
         if tc.empty:
             st.info("No hay vendedores con esos filtros.")
         else:
-            g = tc.assign(
+            leyenda_avance()
+            g = TB.agregar_proyeccion(tc).assign(
                 etiqueta=tc["estado_txt"].str[0] + " " + tc["clientes"].astype(str) + " / " + tc["objetivo"].map("{:.0f}".format),
                 avance_pct=tc["avance"].clip(upper=1.5), avance_txt=(tc["avance"] * 100).map("{:.0f}%".format),
                 esperado_txt=tc["esperado_clientes"].map("{:.0f}".format), faltan_txt=tc["faltan"].map("{:.0f}".format))
@@ -358,15 +360,16 @@ with tab_cob:
             color_c = alt.Color("estado_txt:N", title="Estado", sort=list(TB.ESTADO_AVANCE_TXT.values()),
                                 scale=alt.Scale(domain=list(TB.ESTADO_AVANCE_TXT.values()),
                                                 range=[TB.ESTADO_COLOR[e] for e in TB.ESTADO_AVANCE_TXT]),
-                                legend=alt.Legend(orient="top"))
+                                legend=None)
             tips = [alt.Tooltip("vendedor:N", title="Vendedor"), alt.Tooltip("categoria:N", title="Categoría"),
                     alt.Tooltip("clientes:Q", title="Clientes con compra"), alt.Tooltip("objetivo:Q", title="Objetivo", format=".0f"),
                     alt.Tooltip("avance_txt:N", title="Avance"), alt.Tooltip("esperado_txt:N", title="Esperado a hoy"),
-                    alt.Tooltip("faltan_txt:N", title="Faltan"), alt.Tooltip("estado_txt:N", title="Estado")]
+                    alt.Tooltip("faltan_txt:N", title="Faltan"), alt.Tooltip("estado_txt:N", title="Estado"), alt.Tooltip("proy_txt:N", title="Proyección al cierre")]
             barras_c = alt.Chart().mark_bar(size=12, cornerRadiusEnd=4).encode(y=yv, x=xv, color=color_c, tooltip=tips)
-            texto_c = alt.Chart().mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=yv, x=xv, text="etiqueta:N")
+            proy_c = capa_proyeccion(yv, xv, 12)
+            texto_c = alt.Chart().mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=yv, x=x_texto(xv), text="etiqueta:N")
             esp = alt.Chart().mark_tick(color=GRIS_MARCA, thickness=2, size=18).encode(y=yv, x=alt.X("esperado_pct:Q"))
-            graf_c = alt.layer(barras_c, texto_c, esp, data=g).properties(width=330, height=22 * len(orden) + 10).facet(
+            graf_c = alt.layer(barras_c, proy_c, texto_c, esp, data=g).resolve_scale(color="independent").properties(width=330, height=22 * len(orden) + 10).facet(
                 facet=alt.Facet("categoria:N", sort=list(N.CATEGORIAS_COBERTURA), title=None), columns=2, spacing=24)
             st.altair_chart(graf_c)
             st.caption("La barra es el avance sobre el objetivo de ese vendedor; la marca gris es el avance esperado a hoy "
@@ -382,8 +385,7 @@ with tab_cob:
         if sin_asig:
             st.warning("Hay combos sin categoría asignada (no suman a la cobertura): " + ", ".join(sin_asig) +
                        ". Agregarlos a COMBO_CATEGORIA en transform.py.")
-        st.caption("Semáforo: ✔ en ritmo = va en o por encima del avance esperado (o ya cumplió); ▲ algo atrasado = entre 80 % y 100 % "
-                   "de lo esperado; ✖ atrasado = por debajo del 80 % de lo esperado.")
+        st.caption(TB.AYUDA_SEMAFORO_AVANCE)
 
 # ----------------------------------------------------------------------------- pestaña Mis Ventas
 with tab_mv:
@@ -408,11 +410,12 @@ with tab_mv:
             st.info("No hay vendedores con esos filtros.")
         else:
             k = st.columns(3)
-            k[0].metric("Objetivos en ritmo", f"{int((mv['estado'] == 'verde').sum())} de {len(mv)}", help="Objetivos de campaña que van en o por encima del avance esperado.")
-            k[1].metric("Algo atrasados", int((mv["estado"] == "amarillo").sum()))
-            k[2].metric("Atrasados", int((mv["estado"] == "rojo").sum()))
+            k[0].metric("Objetivos cumplidos", f"{int((mv['estado'] == 'verde').sum())} de {len(mv)}", help="Objetivos de campaña que ya llegaron al target.")
+            k[1].metric("En camino", int((mv["estado"] == "amarillo").sum()), help="Todavía no llegaron, pero al ritmo actual cumplen al cierre del bimestre.")
+            k[2].metric("Proyección insuficiente", int((mv["estado"] == "rojo").sum()), help="Al ritmo actual no llegan al target.")
 
-            g = mv.assign(
+            leyenda_avance()
+            g = TB.agregar_proyeccion(mv).assign(
                 etiqueta=mv["estado_txt"].str[0] + " " + mv["logrado"].map("{:,.0f}".format).str.replace(",", ".") + " / "
                 + mv["target"].map("{:,.0f}".format).str.replace(",", "."),
                 avance_pct=mv["avance"].clip(upper=1.5), avance_txt=(mv["avance"] * 100).map("{:.0f}%".format),
@@ -426,18 +429,20 @@ with tab_mv:
             color_m = alt.Color("estado_txt:N", title="Estado", sort=list(TB.ESTADO_AVANCE_TXT.values()),
                                 scale=alt.Scale(domain=list(TB.ESTADO_AVANCE_TXT.values()),
                                                 range=[TB.ESTADO_COLOR[e] for e in TB.ESTADO_AVANCE_TXT]),
-                                legend=alt.Legend(orient="top"))
+                                legend=None)
             tips = [alt.Tooltip("vendedor:N", title="Vendedor"), alt.Tooltip("panel:N", title="Campaña"),
                     alt.Tooltip("etiqueta:N", title="Logrado / target"), alt.Tooltip("avance_txt:N", title="Avance"),
                     alt.Tooltip("esperado_txt:N", title="Esperado a hoy"), alt.Tooltip("faltan_txt:N", title="Faltan"),
-                    alt.Tooltip("estado_txt:N", title="Estado")]
+                    alt.Tooltip("estado_txt:N", title="Estado"), alt.Tooltip("proy_txt:N", title="Proyección al cierre")]
             b_m = alt.Chart().mark_bar(size=12, cornerRadiusEnd=4).encode(y=yv, x=xv, color=color_m, tooltip=tips)
-            t_m = alt.Chart().mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=yv, x=xv, text="etiqueta:N")
+            p_m = capa_proyeccion(yv, xv, 12)
+            t_m = alt.Chart().mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=yv, x=x_texto(xv), text="etiqueta:N")
             e_m = alt.Chart().mark_tick(color=GRIS_MARCA, thickness=2, size=18).encode(y=yv, x=alt.X("esperado_pct:Q"))
-            st.altair_chart(alt.layer(b_m, t_m, e_m, data=g).properties(width=330, height=22 * len(orden_v) + 10).facet(
+            st.altair_chart(alt.layer(b_m, p_m, t_m, e_m, data=g).resolve_scale(color="independent").properties(width=330, height=22 * len(orden_v) + 10).facet(
                 facet=alt.Facet("panel:N", sort=orden_p, title=None, header=alt.Header(labelLimit=330)), columns=2, spacing=24))
             st.caption("La barra es el avance sobre el target; la marca gris es el avance esperado a hoy. Texto: logrado / target. "
                        "Un vendedor aparece solo en las campañas donde tiene target (el 111 no tiene).")
+            st.caption(TB.AYUDA_SEMAFORO_AVANCE)
             tabla_mv = g.rename(columns={"vendedor": "Vendedor", "panel": "Campaña", "estado_txt": "Estado"})
             tabla_mv = tabla_mv.assign(**{"Logrado": g["logrado"], "Target": g["target"], "Avance (%)": g["avance"] * 100})
             st.dataframe(tabla_mv[["Vendedor", "Campaña", "Estado", "Logrado", "Target", "Avance (%)"]].sort_values(["Campaña", "Vendedor"]),
@@ -481,7 +486,8 @@ with tab_cf:
                            help="Suma de todos los vendedores con objetivo en la línea.")
                 col.caption(f"{TB.ESTADO_AVANCE_TXT[d['estado']]} · faltan {d['faltan']:,.0f} · esperado a hoy: "
                             f"{d['esperado_valor']:,.0f}".replace(",", "."))
-            g = cf.assign(
+            leyenda_avance()
+            g = TB.agregar_proyeccion(cf).assign(
                 etiqueta=cf["estado_txt"].str[0] + " " + cf["logrado"].astype(str) + " / " + cf["objetivo"].map(lambda o: f"{o:.0f}" if o else "s/obj."),
                 avance_pct=cf["avance"].clip(upper=1.5), avance_txt=(cf["avance"] * 100).map("{:.0f}%".format),
                 esperado_txt=cf["esperado_valor"].map("{:.0f}".format), faltan_txt=cf["faltan"].map("{:.0f}".format))
@@ -493,15 +499,16 @@ with tab_cf:
             color_f = alt.Color("estado_txt:N", title="Estado", sort=list(TB.ESTADO_CF_TXT.values()),
                                 scale=alt.Scale(domain=list(TB.ESTADO_CF_TXT.values()),
                                                 range=[TB.ESTADO_COLOR[e] for e in TB.ESTADO_CF_TXT]),
-                                legend=alt.Legend(orient="top"))
+                                legend=None)
             tips = [alt.Tooltip("vendedor:N", title="Vendedor"), alt.Tooltip("panel:N", title="Línea"),
                     alt.Tooltip("etiqueta:N", title="Logrado / objetivo"), alt.Tooltip("avance_txt:N", title="Avance"),
                     alt.Tooltip("esperado_txt:N", title="Esperado a hoy"), alt.Tooltip("faltan_txt:N", title="Faltan"),
-                    alt.Tooltip("estado_txt:N", title="Estado")]
+                    alt.Tooltip("estado_txt:N", title="Estado"), alt.Tooltip("proy_txt:N", title="Proyección al cierre")]
             b_f = alt.Chart().mark_bar(size=12, cornerRadiusEnd=4).encode(y=yv, x=xv, color=color_f, tooltip=tips)
-            t_f = alt.Chart().mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=yv, x=xv, text="etiqueta:N")
+            p_f = capa_proyeccion(yv, xv, 12)
+            t_f = alt.Chart().mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=yv, x=x_texto(xv), text="etiqueta:N")
             e_f = alt.Chart().mark_tick(color=GRIS_MARCA, thickness=2, size=18).encode(y=yv, x=alt.X("esperado_pct:Q"))
-            st.altair_chart(alt.layer(b_f, t_f, e_f, data=g).properties(width=330, height=22 * len(orden_v) + 10).facet(
+            st.altair_chart(alt.layer(b_f, p_f, t_f, e_f, data=g).resolve_scale(color="independent").properties(width=330, height=22 * len(orden_v) + 10).facet(
                 facet=alt.Facet("panel:N", sort=orden_p, title=None, header=alt.Header(labelLimit=330)), columns=2, spacing=24))
             st.caption("La barra es el avance sobre el objetivo de ese vendedor; la marca gris es el avance esperado a hoy. "
                        "Texto: clientes con compra / objetivo. Lo que falta es lo que hay que conseguir hasta fin de octubre.")
@@ -516,8 +523,7 @@ with tab_cf:
                                         "Faltan": st.column_config.NumberColumn(format="%.0f")})
             st.download_button("Descargar Club Faro (CSV)", cf.to_csv(index=False).encode("utf-8"),
                                file_name=f"club_faro_{ini_f:%Y%m}_{corte_b:%Y%m%d}.csv", mime="text/csv")
-            st.caption("Semáforo: ✔ en ritmo = va en o por encima del avance esperado (o ya cumplió); ▲ algo atrasado = entre 80 % y "
-                       "100 % de lo esperado; ✖ atrasado = por debajo del 80 % de lo esperado.")
+            st.caption(TB.AYUDA_SEMAFORO_AVANCE)
             if len(sin_obj):
                 ids_so = sin_obj["vendedor_id"].astype(str).drop_duplicates()
                 dv = dim_vend.assign(vendedor_id=dim_vend["vendedor_id"].astype(str)).drop_duplicates("vendedor_id").set_index("vendedor_id")
@@ -551,7 +557,7 @@ with tab_11t:
                        "los resultados son provisorios hasta que se marquen S o N.")
 
         def graf_t(df, leyenda=True):
-            d = df.assign(avance_pct=df["avance"].clip(upper=1.5), etiqueta=df["estado_txt"].str[0] + " " + df["logrado"].astype(str)
+            d = TB.agregar_proyeccion(df.assign(esperado_pct=rt["esperado_pct"])).assign(avance_pct=df["avance"].clip(upper=1.5), etiqueta=df["estado_txt"].str[0] + " " + df["logrado"].astype(str)
                           + " / " + df["objetivo"].map("{:.0f}".format),
                           avance_txt=(df["avance"] * 100).map("{:.0f}%".format), faltan_txt=df["faltan"].map("{:.0f}".format),
                           esperado_txt=df["esperado_valor"].map("{:.0f}".format),
@@ -562,14 +568,15 @@ with tab_11t:
                       axis=alt.Axis(format="%", values=[0, 0.5, 1.0, 1.5], title="Avance sobre el objetivo"))
             col = alt.Color("estado_txt:N", title="Estado", sort=list(TB.ESTADO_CF_TXT.values()),
                             scale=alt.Scale(domain=list(TB.ESTADO_CF_TXT.values()), range=[TB.ESTADO_COLOR[e] for e in TB.ESTADO_CF_TXT]),
-                            legend=alt.Legend(orient="top") if leyenda else None)
+                            legend=None)
             tips = [alt.Tooltip("nombre:N", title="Línea / canal"), alt.Tooltip("etiqueta:N", title="Logrado / objetivo"),
                     alt.Tooltip("avance_txt:N", title="Avance"), alt.Tooltip("esperado_txt:N", title="Esperado a hoy"),
-                    alt.Tooltip("faltan_txt:N", title="Faltan"), alt.Tooltip("estado_txt:N", title="Estado")]
+                    alt.Tooltip("faltan_txt:N", title="Faltan"), alt.Tooltip("estado_txt:N", title="Estado"), alt.Tooltip("proy_txt:N", title="Proyección al cierre")]
             b = alt.Chart(d).mark_bar(size=16, cornerRadiusEnd=4).encode(y=y, x=x, color=col, tooltip=tips)
-            t = alt.Chart(d).mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=y, x=x, text="etiqueta:N")
+            pr = capa_proyeccion(y, x, 16, data=d)
+            t = alt.Chart(d).mark_text(align="left", dx=5, fontSize=11, color=TXT).encode(y=y, x=x_texto(x), text="etiqueta:N")
             e = alt.Chart(d).mark_tick(color=GRIS_MARCA, thickness=2, size=20).encode(y=y, x=alt.X("esperado_pct:Q"))
-            st.altair_chart(alt.layer(b, t, e).properties(height=alt.Step(36)), use_container_width=True)
+            st.altair_chart(alt.layer(b, pr, t, e).resolve_scale(color="independent").properties(height=alt.Step(36)), use_container_width=True)
 
         ct = rt["canales"]
         kt = st.columns(len(ct))
@@ -577,14 +584,15 @@ with tab_11t:
             colm.metric(r.nombre, f"{r.logrado} de {r.objetivo:.0f}", help="Clientes distintos que califican en al menos una línea.")
             colm.caption(f"{r.estado_txt} · faltan {r.faltan:.0f} · esperado a hoy: {r.esperado_valor:.0f}")
         st.markdown("**Por línea**")
+        leyenda_avance(sin_objetivo=True)
         graf_t(rt["lineas"])
         st.markdown("**Por canal**")
         graf_t(rt["canales"])
         st.markdown("**Detalle de OP & VTK**")
         st.caption("Los cuatro subcanales con rubro en la base más Catering (sin rubro). Cada cliente cuenta en un solo subcanal.")
         graf_t(rt["subcanales"], leyenda=False)
-        st.caption("La barra es el avance sobre el objetivo; la marca gris es el avance esperado a hoy. Catering no tiene rubro en "
-                   "la base (queda en 0). Sin objetivo (0) no hay semáforo.")
+        st.caption("La barra es el avance sobre el objetivo; la marca gris es el avance esperado a hoy; el tramo azul claro, la proyección "
+                   "al cierre. Catering no tiene rubro en la base (queda en 0). Sin objetivo (0) no hay semáforo.")
         tabla_t = pd.concat([rt["lineas"].assign(Tipo="Línea"), rt["canales"].assign(Tipo="Canal"),
                              rt["subcanales"].assign(Tipo="OP & VTK")], ignore_index=True)
         st.dataframe(tabla_t.rename(columns={"nombre": "Nombre", "estado_txt": "Estado", "logrado": "Logrado", "objetivo": "Objetivo",
