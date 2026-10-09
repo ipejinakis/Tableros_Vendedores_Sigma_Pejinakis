@@ -62,7 +62,8 @@ def test_crear_y_autenticar_con_clave_temporal(tmp_path):
     st = _store(tmp_path)
     clave = st.crear("101", A.ROL_VENDEDOR, "Arias Daniel", vendedor_id="101")
     s = st.autenticar("101", clave)
-    assert s == {"usuario": "101", "rol": "vendedor", "nombre": "Arias Daniel", "vendedor_id": "101", "debe_cambiar": True}
+    assert s == {"usuario": "101", "rol": "vendedor", "nombre": "Arias Daniel", "vendedor_id": "101", "supervisor_id": None,
+                "debe_cambiar": True}
     assert st.autenticar("101", "otra") is None and st.autenticar("999", clave) is None
     assert st.autenticar(" 101 ", clave) is not None             # el usuario se normaliza
 
