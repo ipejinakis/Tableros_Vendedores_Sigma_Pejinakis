@@ -45,6 +45,25 @@ echo "== Entorno Python =="
 "$APP_DIR/venv/bin/pip" install -q --upgrade pip
 "$APP_DIR/venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
 
+echo "== Idioma de la página (evita que Chrome/Edge la traduzcan del inglés) =="
+# Streamlit sirve static/index.html con lang="en". Se corrige en el HTML estático (se reaplica en cada instalación,
+# porque pip puede restaurar el archivo original).
+"$APP_DIR/venv/bin/python" - <<'PYEOF'
+import pathlib, streamlit
+f = pathlib.Path(streamlit.__file__).parent / "static" / "index.html"
+h = f.read_text(encoding="utf-8")
+n = h
+if '<html lang="en"' in n:
+    n = n.replace('<html lang="en"', '<html lang="es" translate="no"', 1)
+if 'name="google"' not in n:
+    n = n.replace("<head>", '<head><meta name="google" content="notranslate">', 1)
+if n != h:
+    f.write_text(n, encoding="utf-8")
+    print("   index.html de Streamlit parcheado (lang=es + notranslate)")
+else:
+    print("   index.html ya estaba parcheado")
+PYEOF
+
 echo "== Permisos =="
 chown -R "$SVC_USER":"$SVC_USER" "$APP_DIR" "$LOG_DIR"
 chmod 700 "$APP_DIR/data"
