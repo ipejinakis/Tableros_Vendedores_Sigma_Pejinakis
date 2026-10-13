@@ -88,7 +88,7 @@ def test_la_vista_del_vendedor_levanta_y_muestra_solo_lo_suyo(tmp_path):
     assert not at.exception
     assert len(at.metric) == 3                                    # venta, premio ganado, premio a fin de mes
     texto = " ".join(m.value for m in at.metric)
-    assert "60,0 M$" in texto                                     # sus 60 M$ (no el total de la empresa ni los de otros)
+    assert "$ 60.000.000" in texto                                     # sus 60 M$ (no el total de la empresa ni los de otros)
 
 
 def test_la_vista_del_vendedor_exige_rol_vendedor(tmp_path):

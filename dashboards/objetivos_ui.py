@@ -59,8 +59,8 @@ def panel_objetivos(sesion: dict, nombres_sigma: dict, hoy: date | None = None) 
             st.caption(f"Este mes todavía no tiene configuración propia: hereda la de {cfg.origen}. Al guardar se crea una propia.")
 
     # --- escalas y premios
-    escalas = pd.DataFrame([{"Perfil": p, "Escalón 1 (M$)": cfg.escalas[p][0] / 1e6, "Escalón 2 (M$)": cfg.escalas[p][1] / 1e6,
-                             "Escalón 3 (M$)": cfg.escalas[p][2] / 1e6} for p in CO.PERFILES])
+    escalas = pd.DataFrame([{"Perfil": p, "Escalón 1 (millones de pesos)": cfg.escalas[p][0] / 1e6, "Escalón 2 (millones de pesos)": cfg.escalas[p][1] / 1e6,
+                             "Escalón 3 (millones de pesos)": cfg.escalas[p][2] / 1e6} for p in CO.PERFILES])
     premios = pd.DataFrame([{"Escalón 1 ($)": cfg.premios[0], "Escalón 2 ($)": cfg.premios[1], "Escalón 3 ($)": cfg.premios[2]}])
     perfiles = pd.DataFrame([{"Código": v, "Vendedor": nombres_sigma.get(v, v), "Perfil": p,
                               "Supervisor": N.SUPERVISORES.get(N.SUPERVISOR_VENDEDOR.get(v, ""), "— sin equipo —")}
@@ -94,7 +94,7 @@ def panel_objetivos(sesion: dict, nombres_sigma: dict, hoy: date | None = None) 
         if c1.button("Guardar cambios", type="primary", key=f"obj_guardar_{clave}"):
             try:
                 nuevo = {
-                    "escalas": {r["Perfil"]: [round(r[f"Escalón {i} (M$)"] * 1e6) for i in (1, 2, 3)] for _, r in esc_ed.iterrows()},
+                    "escalas": {r["Perfil"]: [round(r[f"Escalón {i} (millones de pesos)"] * 1e6) for i in (1, 2, 3)] for _, r in esc_ed.iterrows()},
                     "premios": [int(pre_ed.iloc[0][f"Escalón {i} ($)"]) for i in (1, 2, 3)],
                     "vendedor_perfil": dict(cfg.vendedor_perfil),
                 }

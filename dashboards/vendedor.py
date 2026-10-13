@@ -144,10 +144,10 @@ escalones = pd.DataFrame({
     "objetivo_m": [f["objetivo_esc1"] / 1e6, f["objetivo_esc2"] / 1e6, f["objetivo_esc3"] / 1e6],
     "premio_txt": [TB.fmt_pesos(p) for p in CFG.premios],
 })
-escalones["objetivo_txt"] = escalones["objetivo_m"].map(lambda x: f"{x:,.0f} M$".replace(",", "."))
+escalones["objetivo_txt"] = escalones["objetivo_m"].map(lambda x: f"$ {x:,.0f} millones".replace(",", "."))
 escalones["etiqueta"] = escalones["escalon"] + " · " + escalones["objetivo_txt"]
 tope = max(escalones["objetivo_m"].max() * 1.08, f["vendido"] / 1e6 * 1.05)
-x = alt.X("x:Q", scale=alt.Scale(domain=[0, tope]), title="Venta neta del mes (M$)")
+x = alt.X("x:Q", scale=alt.Scale(domain=[0, tope]), title="Venta neta del mes (millones de pesos)")
 vend_df = pd.DataFrame({"x": [f["vendido"] / 1e6], "y": [""], "venta_txt": [TB.fmt_millones(f["vendido"])]})
 barra = alt.Chart(vend_df).mark_bar(size=26, cornerRadiusEnd=4, color=TB.ESTADO_COLOR[f["estado"]]).encode(
     x=x, y=alt.Y("y:N", title=None, axis=None), tooltip=[alt.Tooltip("venta_txt:N", title="Vendido")])
@@ -346,6 +346,6 @@ if _tiene_11t:
 # ----------------------------------------------------------------------------- canales
 with tab_canal:
     canales = pd.DataFrame({"Canal": ["Axum", "Compre Ahora", "Directa"],
-                            "Venta neta (M$)": [f["Axum"] / 1e6, f["Compre Ahora"] / 1e6, f["Directa"] / 1e6]})
-    st.dataframe(canales, hide_index=True, column_config={"Venta neta (M$)": st.column_config.NumberColumn(format="%.1f")})
+                            "Venta neta (millones de pesos)": [f["Axum"] / 1e6, f["Compre Ahora"] / 1e6, f["Directa"] / 1e6]})
+    st.dataframe(canales, hide_index=True, column_config={"Venta neta (millones de pesos)": st.column_config.NumberColumn(format="%.1f")})
     st.caption("Directa = cargas hechas directamente en SIGMA y notas de crédito. Tu objetivo se mide sobre el total de los tres.")

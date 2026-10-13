@@ -133,7 +133,7 @@ def test_store_meses_y_ultimo_dia(tmp_path):
 
 def test_formatos_es_ar():
     assert TB.fmt_pesos(1234567.4) == "$ 1.234.567" and TB.fmt_pesos(None) == "—"
-    assert TB.fmt_millones(48_260_000) == "48,3 M$" and TB.fmt_millones(1_234_000_000) == "1.234,0 M$"
+    assert TB.fmt_millones(48_260_000) == "$ 48.260.000" and TB.fmt_millones(1_234_000_000) == "$ 1.234.000.000"
 
 
 def test_estado_facturacion_semaforo():

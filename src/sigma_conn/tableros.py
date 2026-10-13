@@ -557,6 +557,6 @@ def fmt_pesos(x) -> str:
 
 
 def fmt_millones(x, dec: int = 1) -> str:
-    if x is None or x != x:
-        return "—"
-    return f"{x / 1e6:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".") + " M$"
+    """Importe completo en pesos: `$ 48.260.000`. Antes salía "48,3 M$" y el traductor del navegador lo mostraba como
+    "millones de dólares"; el nombre y `dec` se conservan para no tocar a los que la llaman."""
+    return fmt_pesos(x)

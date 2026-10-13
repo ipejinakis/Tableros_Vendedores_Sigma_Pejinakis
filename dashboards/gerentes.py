@@ -204,12 +204,12 @@ def mostrar_sin_escala():
         st.subheader(f"{sup}: venta sin escala")
         st.caption(esc(f"Mes {mes} · corte {corte:%d/%m/%Y} · neto sin IVA, todos los canales. Sin escalones ni premio "
                        f"(no tienen escala de preventa). Total: {TB.fmt_millones(d['vendido'].sum())}"))
-        st.dataframe(d.assign(**{"Venta neta (M$)": d["vendido"] / 1e6, "Axum (M$)": d["Axum"] / 1e6,
-                                 "Compre Ahora (M$)": d["Compre Ahora"] / 1e6, "Directa (M$)": d["Directa"] / 1e6,
-                                 "Otro (M$)": d["Otro"] / 1e6}).rename(columns={"vendedor_id": "Código", "vendedor": "Vendedor"})[
-            ["Código", "Vendedor", "Venta neta (M$)", "Axum (M$)", "Compre Ahora (M$)", "Directa (M$)", "Otro (M$)"]],
+        st.dataframe(d.assign(**{"Venta neta (millones de pesos)": d["vendido"] / 1e6, "Axum (millones de pesos)": d["Axum"] / 1e6,
+                                 "Compre Ahora (millones de pesos)": d["Compre Ahora"] / 1e6, "Directa (millones de pesos)": d["Directa"] / 1e6,
+                                 "Otro (millones de pesos)": d["Otro"] / 1e6}).rename(columns={"vendedor_id": "Código", "vendedor": "Vendedor"})[
+            ["Código", "Vendedor", "Venta neta (millones de pesos)", "Axum (millones de pesos)", "Compre Ahora (millones de pesos)", "Directa (millones de pesos)", "Otro (millones de pesos)"]],
             hide_index=True, column_config={c: st.column_config.NumberColumn(format="%.1f") for c in
-                                            ("Venta neta (M$)", "Axum (M$)", "Compre Ahora (M$)", "Directa (M$)", "Otro (M$)")})
+                                            ("Venta neta (millones de pesos)", "Axum (millones de pesos)", "Compre Ahora (millones de pesos)", "Directa (millones de pesos)", "Otro (millones de pesos)")})
 
 
 if tabla.empty:
@@ -277,24 +277,24 @@ with tab_fact:
 
     disp = pd.DataFrame({
         "Vendedor": tabla["vendedor"], "Supervisor": tabla["supervisor"], "Perfil": tabla["perfil"],
-        "Venta neta (M$)": tabla["vendido"] / 1e6,
+        "Venta neta (millones de pesos)": tabla["vendido"] / 1e6,
         "% del escalón 1": tabla["avance_esc1"] * 100,
         "Estado": tabla["estado_txt"],
         "Escalón": tabla["escalon"].map(lambda e: str(e) if e else "—"),
         "Premio alcanzado": tabla["premio"].map(TB.fmt_pesos),
         "Premio al ritmo actual": tabla["premio_proyectado"].map(TB.fmt_pesos),
-        "Proyección (M$)": tabla["proyeccion"] / 1e6,
-        "Ritmo (M$/día)": tabla["ritmo_diario"] / 1e6,
-        "Falta p/ siguiente (M$)": tabla["faltante_siguiente"] / 1e6,
-        "Necesita (M$/día)": tabla["media_necesaria"] / 1e6,
-    }).sort_values("Venta neta (M$)", ascending=False)
+        "Proyección (millones de pesos)": tabla["proyeccion"] / 1e6,
+        "Ritmo (millones de pesos/día)": tabla["ritmo_diario"] / 1e6,
+        "Falta p/ siguiente (millones de pesos)": tabla["faltante_siguiente"] / 1e6,
+        "Necesita (millones de pesos/día)": tabla["media_necesaria"] / 1e6,
+    }).sort_values("Venta neta (millones de pesos)", ascending=False)
     st.dataframe(disp, hide_index=True, column_config={
-        "Venta neta (M$)": st.column_config.NumberColumn(format="%.1f"),
+        "Venta neta (millones de pesos)": st.column_config.NumberColumn(format="%.1f"),
         "% del escalón 1": st.column_config.NumberColumn(format="%.0f%%"),
-        "Proyección (M$)": st.column_config.NumberColumn(format="%.1f"),
-        "Ritmo (M$/día)": st.column_config.NumberColumn(format="%.2f"),
-        "Falta p/ siguiente (M$)": st.column_config.NumberColumn(format="%.1f"),
-        "Necesita (M$/día)": st.column_config.NumberColumn(format="%.2f"),
+        "Proyección (millones de pesos)": st.column_config.NumberColumn(format="%.1f"),
+        "Ritmo (millones de pesos/día)": st.column_config.NumberColumn(format="%.2f"),
+        "Falta p/ siguiente (millones de pesos)": st.column_config.NumberColumn(format="%.1f"),
+        "Necesita (millones de pesos/día)": st.column_config.NumberColumn(format="%.2f"),
     })
     st.download_button("Descargar tabla (CSV)", tabla.to_csv(index=False).encode("utf-8"),
                        file_name=f"facturacion_{mes}_{corte:%Y%m%d}.csv", mime="text/csv")
@@ -305,9 +305,9 @@ with tab_fact:
         if sin.empty:
             st.write("Ninguno en este período.")
         else:
-            st.dataframe(sin.assign(**{"Venta neta (M$)": sin["vendido"] / 1e6})[["vendedor_id", "vendedor", "Venta neta (M$)"]]
+            st.dataframe(sin.assign(**{"Venta neta (millones de pesos)": sin["vendido"] / 1e6})[["vendedor_id", "vendedor", "Venta neta (millones de pesos)"]]
                          .rename(columns={"vendedor_id": "Código", "vendedor": "Vendedor"}), hide_index=True,
-                         column_config={"Venta neta (M$)": st.column_config.NumberColumn(format="%.1f")})
+                         column_config={"Venta neta (millones de pesos)": st.column_config.NumberColumn(format="%.1f")})
         st.caption(esc(f"Total empresa (con y sin escala): {TB.fmt_millones(resumen['total_empresa'])}"))
     mostrar_sin_escala()
 
@@ -671,25 +671,25 @@ with tab_canal:
         col.metric(f"{canal} (toda la empresa)", TB.fmt_millones(pc[canal]), f"{pc[canal] / tot * 100:.0f}% del total", delta_color="off")
     st.caption("Directa = cargas hechas directamente en SIGMA y todas las notas de crédito. Los objetivos se miden sobre el total.")
     canales = pd.DataFrame({
-        "Vendedor": tabla["vendedor"], "Axum (M$)": tabla["Axum"] / 1e6, "Compre Ahora (M$)": tabla["Compre Ahora"] / 1e6,
-        "Directa (M$)": tabla["Directa"] / 1e6, "Total (M$)": tabla["vendido"] / 1e6,
+        "Vendedor": tabla["vendedor"], "Axum (millones de pesos)": tabla["Axum"] / 1e6, "Compre Ahora (millones de pesos)": tabla["Compre Ahora"] / 1e6,
+        "Directa (millones de pesos)": tabla["Directa"] / 1e6, "Total (millones de pesos)": tabla["vendido"] / 1e6,
     })
     for sup in sup_extra_sel:       # vendedores sin escala de los supervisores elegidos (p. ej. GERENCIA SLA): solo gerentes
         d = TB.ventas_sin_escala(ventas, dim_art, dim_vend, corte, N.SUPERVISOR_SIN_ESCALA[sup])
         canales = pd.concat([canales, pd.DataFrame({
-            "Vendedor": d["vendedor"] + " (sin escala)", "Axum (M$)": d["Axum"] / 1e6, "Compre Ahora (M$)": d["Compre Ahora"] / 1e6,
-            "Directa (M$)": d["Directa"] / 1e6, "Total (M$)": d["vendido"] / 1e6})], ignore_index=True)
-    canales = canales.sort_values("Total (M$)", ascending=False)
+            "Vendedor": d["vendedor"] + " (sin escala)", "Axum (millones de pesos)": d["Axum"] / 1e6, "Compre Ahora (millones de pesos)": d["Compre Ahora"] / 1e6,
+            "Directa (millones de pesos)": d["Directa"] / 1e6, "Total (millones de pesos)": d["vendido"] / 1e6})], ignore_index=True)
+    canales = canales.sort_values("Total (millones de pesos)", ascending=False)
     st.dataframe(canales, hide_index=True, column_config={c: st.column_config.NumberColumn(format="%.1f")
                                                          for c in canales.columns if c != "Vendedor"})
 
 # ----------------------------------------------------------------------------- pestaña escalas
 with tab_escalas:
-    tabla_esc = pd.DataFrame([{"Perfil": p, "Escalón 1 (M$)": e[0] / 1e6, "Escalón 2 (M$)": e[1] / 1e6, "Escalón 3 (M$)": e[2] / 1e6,
+    tabla_esc = pd.DataFrame([{"Perfil": p, "Escalón 1 (millones de pesos)": e[0] / 1e6, "Escalón 2 (millones de pesos)": e[1] / 1e6, "Escalón 3 (millones de pesos)": e[2] / 1e6,
                          "Vendedores": ", ".join(v for v, pp in sorted(CFG.vendedor_perfil.items()) if pp == p)}
                         for p, e in CFG.escalas.items()])
     st.dataframe(tabla_esc, hide_index=True, column_config={c: st.column_config.NumberColumn(format="%.0f")
-                                                     for c in ("Escalón 1 (M$)", "Escalón 2 (M$)", "Escalón 3 (M$)")})
+                                                     for c in ("Escalón 1 (millones de pesos)", "Escalón 2 (millones de pesos)", "Escalón 3 (millones de pesos)")})
     st.write("Premio por escalón alcanzado: " + esc(" · ".join(
         f"escalón {i}: {TB.fmt_pesos(p)}" for i, p in enumerate(CFG.premios, start=1))) + ".")
     st.caption("Escalas de venta neta mensual sin IVA por vendedor, vigentes en el mes elegido (se editan en la pestaña Objetivos). "

@@ -20,6 +20,21 @@ import streamlit as st  # noqa: E402
 
 st.set_page_config(page_title="Tableros de ventas", layout="wide")
 
+# Streamlit publica la página con lang="en": el navegador cree que el texto está en inglés, ofrece traducirlo y rompe cosas
+# ("M$" pasaba a "millones de dólares", "Escalón alcanzado" a "Escalan alcanzar"). Se marca como español y sin traducción.
+try:
+    import streamlit.components.v1 as _components
+    _components.html("""<script>
+      const d = window.parent.document;
+      d.documentElement.lang = "es";
+      d.documentElement.setAttribute("translate", "no");
+      if (!d.querySelector('meta[name="google"]')) {
+        const m = d.createElement("meta"); m.name = "google"; m.content = "notranslate"; d.head.appendChild(m);
+      }
+    </script>""", height=0)
+except Exception:  # noqa: BLE001  (si cambia la API, el tablero sigue funcionando)
+    pass
+
 import auth_ui  # noqa: E402
 from sigma_conn import auth as A  # noqa: E402
 
