@@ -1,0 +1,23 @@
+# Tema de Ventas: el mismo que los tableros de Rentabilidad y Torre de control.
+# Se define theme.light y theme.dark (y no un [theme] a secas) para que el menú de Streamlit conserve la opción
+# de cambiar entre claro y oscuro. No se fijan fondos ni colores de texto a propósito.
+# Streamlit lee este archivo si el proceso corre con la raíz del proyecto como directorio de trabajo
+# (así lo define el servicio systemd: WorkingDirectory=/opt/tableros-sigma).
+
+[theme.light]
+primaryColor = "#2a78d6"
+font = "sans serif"
+
+[theme.dark]
+primaryColor = "#2a78d6"
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+# "viewer" = opciones de lector (tema claro/oscuro, imprimir) sin las de desarrollador (Rerun, Clear cache, Deploy).
+toolbarMode = "viewer"

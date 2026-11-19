@@ -42,6 +42,11 @@ def _preparar(tmp_path, con_objetivos=False):
     return data
 
 
+def _tarjetas(at):
+    """Tarjetas KPI de la página (`estilo_pej.tarjeta_kpi` las dibuja con st.markdown)."""
+    return [m.value for m in at.markdown if 'class="pj-kpi' in m.value]
+
+
 def _correr(pagina, sesion, data):
     from streamlit.testing.v1 import AppTest
     previo = {k: os.environ.get(k) for k in ("SIGMA_DATA_DIR", "SIGMA_STORE_FORMAT")}
@@ -67,35 +72,37 @@ def test_la_app_de_gerentes_levanta_sin_errores(tmp_path):
     _requiere_streamlit()
     at = _correr("gerentes.py", GERENTE, _preparar(tmp_path))
     assert not at.exception
-    assert len(at.metric) >= 4
+    assert len(_tarjetas(at)) >= 4
+    assert not at.metric                                          # ya no queda ningún st.metric
 
 
 def test_gerentes_sin_sesion_no_muestra_datos(tmp_path):
     _requiere_streamlit()
     at = _correr("gerentes.py", None, _preparar(tmp_path))
-    assert not at.exception and len(at.metric) == 0 and len(at.error) == 1
+    assert not at.exception and len(_tarjetas(at)) == 0 and len(at.error) == 1
 
 
 def test_un_vendedor_no_entra_al_tablero_de_gerentes(tmp_path):
     _requiere_streamlit()
     at = _correr("gerentes.py", VENDEDOR, _preparar(tmp_path))
-    assert not at.exception and len(at.metric) == 0 and len(at.error) == 1
+    assert not at.exception and len(_tarjetas(at)) == 0 and len(at.error) == 1
 
 
 def test_la_vista_del_vendedor_levanta_y_muestra_solo_lo_suyo(tmp_path):
     _requiere_streamlit()
     at = _correr("vendedor.py", VENDEDOR, _preparar(tmp_path, con_objetivos=True))
     assert not at.exception
-    assert len(at.metric) == 3                                    # venta, premio ganado, premio a fin de mes
-    texto = " ".join(m.value for m in at.metric)
-    assert "$ 60.000.000" in texto                                     # sus 60 M$ (no el total de la empresa ni los de otros)
+    tarjetas = _tarjetas(at)
+    assert len(tarjetas) == 3 and not at.metric                   # venta, premio ganado, premio a fin de mes
+    texto = " ".join(tarjetas)
+    assert "&#36; 60.000.000" in texto                            # sus 60 M$ (no el total de la empresa ni los de otros); el $ va como entidad HTML
 
 
 def test_la_vista_del_vendedor_exige_rol_vendedor(tmp_path):
     _requiere_streamlit()
     for sesion in (None, GERENTE):
         at = _correr("vendedor.py", sesion, _preparar(tmp_path))
-        assert not at.exception and len(at.metric) == 0 and len(at.error) == 1
+        assert not at.exception and len(_tarjetas(at)) == 0 and len(at.error) == 1
 
 
 def test_marcas_de_texto_y_lineas_llevan_color_explicito():
@@ -127,3 +134,42 @@ def test_las_paginas_exigen_sesion_y_el_vendedor_sale_de_la_sesion():
             if control in linea:
                 assert "vendedor" not in linea.lower().split("=")[0], f"el vendedor no puede elegirse en pantalla: {linea.strip()}"
     assert "requerir_login()" in app and "ve_todo(usuario)" in app
+
+
+def test_ninguna_pagina_usa_st_metric_y_el_usuario_se_dibuja_al_pie():
+    """La estética nueva reemplaza st.metric por tarjetas; el bloque del usuario va después de los filtros de cada página."""
+    for pagina in sorted((ROOT / "dashboards").glob("*.py")):
+        assert ".metric(" not in pagina.read_text(encoding="utf-8"), f"{pagina.name}: quedó un st.metric"
+    for nombre in ("gerentes.py", "vendedor.py"):
+        src = (ROOT / "dashboards" / nombre).read_text(encoding="utf-8")
+        assert "auth_ui.bloque_usuario(_sesion)" in src, f"{nombre}: falta el bloque del usuario al pie de la barra lateral"
+    app = (ROOT / "dashboards" / "app.py").read_text(encoding="utf-8")
+    assert "barra_lateral_nav(" in app and "requerir_login()" in app
+
+
+def test_app_dibuja_el_bloque_del_usuario_aunque_la_pagina_se_corte():
+    """Si la página hace st.stop() antes de sus filtros (sin datos), app.py lo dibuja igual: siempre se puede cerrar la sesión."""
+    app = (ROOT / "dashboards" / "app.py").read_text(encoding="utf-8")
+    assert "finally:" in app and "_pj_bloque_ok" in app and "auth_ui.bloque_usuario(usuario)" in app
+
+
+def test_etiquetas_con_tabla_vacia_no_rompen():
+    """Regresión: con 0 filas, Series.map() devuelve float64 y `str + float64` tira TypeError (pandas 3 / arrow).
+    Pasó en producción con el bimestre nuevo sin objetivos de Club Faro. Las etiquetas se arman con astype(str)."""
+    import pandas as pd
+    cf = pd.DataFrame({"estado_txt": pd.Series([], dtype=object), "logrado": pd.Series([], dtype=float),
+                       "objetivo": pd.Series([], dtype=float)})
+    et = (cf["estado_txt"].astype(str).str[0] + " " + cf["logrado"].astype(str) + " / "
+          + cf["objetivo"].map(lambda o: f"{o:.0f}" if o else "s/obj.").astype(str))
+    assert len(et) == 0
+
+
+def test_dashboards_castean_a_str_el_resultado_de_map_en_etiquetas():
+    import re
+    for f in ("gerentes.py", "vendedor.py"):
+        src = (Path(__file__).resolve().parent.parent / "dashboards" / f).read_text(encoding="utf-8")
+        for m in re.finditer(r'etiqueta=[^\n]*(?:\n\s*\+[^\n]*)?', src):
+            t = m.group(0)
+            assert '"estado_txt"].str[0]' not in t, t
+            for mm in re.finditer(r'\.map\([^)]*\)\)?', t):
+                assert ".astype(str)" in t[mm.end():mm.end() + 15] or ".str." in t[mm.end():mm.end() + 6], t

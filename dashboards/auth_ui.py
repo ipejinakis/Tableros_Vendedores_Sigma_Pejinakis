@@ -6,6 +6,7 @@ el ingreso deja una cookie con un token al azar y el servidor guarda solo su has
 dura `SESION_DIAS` días y se revoca al salir, al cambiar o resetear la clave y al desactivar el usuario."""
 import json
 import sys
+from html import escape
 from pathlib import Path
 
 try:
@@ -19,6 +20,7 @@ import streamlit as st  # noqa: E402
 import streamlit.components.v1 as components  # noqa: E402
 
 from sigma_conn import auth as A  # noqa: E402
+import estilo_pej as E  # noqa: E402
 from estilo import mostrar_logo  # noqa: E402
 
 ROL_TXT = {A.ROL_GERENTE: "Gerente", A.ROL_SUPERVISOR: "Supervisor", A.ROL_VENDEDOR: "Vendedor"}
@@ -131,53 +133,61 @@ def requerir_login() -> dict:
             st.stop()
         return sesion
 
-    mostrar_logo(240)
-    st.title("Tableros de ventas")
-    if not store.existe():
-        st.error("Todavía no hay usuarios creados. Correr: python scripts/admin/usuarios.py iniciales")
-        st.stop()
-    st.caption("Ingresá con tu usuario (los vendedores, su código) y tu clave.")
-    with st.form("ingreso"):
-        usuario = st.text_input("Usuario")
-        clave = st.text_input("Clave", type="password")
-        mantener = st.checkbox(f"Mantener la sesión iniciada en este equipo ({A.SESION_DIAS} días)", value=True,
-                               help="Si es una computadora compartida, destildalo: así tendrás que ingresar de nuevo al recargar.")
-        entrar = st.form_submit_button("Entrar")
-    if entrar:
-        lim, lim_ip, ip, aud = _limitador(), _limitador_ip(), _ip_cliente(), _auditoria(store)
-        espera = max(lim.segundos_bloqueado(usuario), lim_ip.segundos_bloqueado(f"ip:{ip}") if ip != "?" else 0)
-        if espera:
-            aud.registrar("ingreso_bloqueado", usuario, ip)
-            st.error(f"Demasiados intentos. Probá de nuevo en {espera // 60 + 1} minuto(s).")
-        else:
-            sesion = store.autenticar(usuario, clave)
-            if sesion:
-                lim.ok(usuario)
-                aud.registrar("ingreso_ok", sesion["usuario"], ip)
-                st.session_state["usuario"] = sesion
-                st.session_state["_mantener"] = mantener
-                if mantener and not sesion.get("debe_cambiar"):
-                    _recordar(store, sesion["usuario"])
-                st.rerun()
-            lim.fallo(usuario)
-            if ip != "?":
-                lim_ip.fallo(f"ip:{ip}")
-            aud.registrar("ingreso_fallido", usuario, ip)
-            st.error("Usuario o clave incorrectos.")
+    _, centro, _ = st.columns([1, 1.4, 1])      # formulario angosto y centrado, como en Rentabilidad y Torre de control
+    with centro:
+        mostrar_logo(240)
+        st.subheader("Acceso a Tableros")
+        if not store.existe():
+            st.error("Todavía no hay usuarios creados. Correr: python scripts/admin/usuarios.py iniciales")
+            st.stop()
+        st.caption("Ingresá con tu usuario (los vendedores, su código) y tu contraseña.")
+        with st.form("ingreso"):
+            usuario = st.text_input("Usuario")
+            clave = st.text_input("Contraseña", type="password")
+            mantener = st.checkbox(f"Mantener la sesión iniciada en este equipo ({A.SESION_DIAS} días)", value=True,
+                                   help="Si es una computadora compartida, destildalo: así tendrás que ingresar de nuevo al recargar.")
+            entrar = st.form_submit_button("Ingresar")
+        if entrar:
+            lim, lim_ip, ip, aud = _limitador(), _limitador_ip(), _ip_cliente(), _auditoria(store)
+            espera = max(lim.segundos_bloqueado(usuario), lim_ip.segundos_bloqueado(f"ip:{ip}") if ip != "?" else 0)
+            if espera:
+                aud.registrar("ingreso_bloqueado", usuario, ip)
+                st.error(f"Demasiados intentos. Probá de nuevo en {espera // 60 + 1} minuto(s).")
+            else:
+                sesion = store.autenticar(usuario, clave)
+                if sesion:
+                    lim.ok(usuario)
+                    aud.registrar("ingreso_ok", sesion["usuario"], ip)
+                    st.session_state["usuario"] = sesion
+                    st.session_state["_mantener"] = mantener
+                    if mantener and not sesion.get("debe_cambiar"):
+                        _recordar(store, sesion["usuario"])
+                    st.rerun()
+                lim.fallo(usuario)
+                if ip != "?":
+                    lim_ip.fallo(f"ip:{ip}")
+                aud.registrar("ingreso_fallido", usuario, ip)
+                st.error("Usuario o contraseña incorrectos.")
     st.stop()
 
 
-def barra_usuario(sesion: dict) -> None:
-    """Datos del usuario, cambio de clave y salida, arriba de la barra lateral."""
+def bloque_usuario(sesion: dict) -> None:
+    """Usuario, rol, cambio de clave, cierre de sesión y cartel "Datos al", al pie de la barra lateral.
+
+    Se llama DESPUÉS de los filtros de la página (orden: menú, filtros, usuario). Si la página se corta antes de
+    dibujar sus filtros, `app.py` lo dibuja igual para que siempre se pueda cerrar la sesión; la marca
+    `_pj_bloque_ok` evita que quede dos veces."""
+    st.session_state["_pj_bloque_ok"] = True
     sb = st.sidebar
-    sb.markdown(f"**{sesion['nombre']}**")
-    sb.caption(ROL_TXT.get(sesion["rol"], sesion["rol"]))
+    rol = ROL_TXT.get(sesion["rol"], sesion["rol"])
+    sb.markdown(f'<div class="pj-user"><b>{escape(str(sesion["nombre"]))}</b><span>{escape(str(rol))}</span></div>',
+                unsafe_allow_html=True)
     with sb.expander("Cambiar mi clave"):
         us = A.UsuariosStore(A.ruta_usuarios())
         if _formulario_cambio(us, sesion["usuario"], "voluntario", obligatorio=False) and st.session_state.get("_token"):
             _recordar(us, sesion["usuario"])    # cambiar la clave invalida la cookie vieja: se entrega una nueva
             _aplicar_cookie()
-    if sb.button("Salir"):
+    if sb.button("Cerrar sesión"):
         token = st.session_state.get("_token") or _cookie_del_navegador()
         _almacen = A.UsuariosStore(A.ruta_usuarios())
         _sesiones(_almacen).revocar(token)
@@ -185,4 +195,9 @@ def barra_usuario(sesion: dict) -> None:
         st.session_state.clear()
         st.session_state["_cookie_accion"] = ("borrar", "")
         st.rerun()
-    sb.divider()
+    try:
+        from sigma_conn import tableros as TB
+        meta = TB.abrir_store().read_meta()
+    except Exception:  # noqa: BLE001  (sin datos todavía: el cartel avisa que no hay dato)
+        meta = None
+    sb.markdown(E.cartel_datos_html(meta), unsafe_allow_html=True)
