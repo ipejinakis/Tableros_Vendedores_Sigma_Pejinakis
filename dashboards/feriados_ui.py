@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 
 import auth_ui
+import estilo_pej as E
 from sigma_conn import auth as A
 from sigma_conn import config_feriados as CF
 from sigma_conn import config_objetivos as CO
@@ -63,8 +64,8 @@ def panel_feriados(sesion: dict, hoy: date | None = None) -> None:
     base = O.dias_de_venta_mes(anio, m)
     con = O.dias_de_venta_mes(anio, m, frozenset(elegidos))
     c1, c2 = st.columns(2)
-    c1.metric("Días de venta del mes (sin domingos)", base)
-    c2.metric("Días de venta con estos feriados", con, delta=con - base if con != base else None, delta_color="off")
+    E.tarjeta_kpi("Días de venta del mes (sin domingos)", base, donde=c1)
+    E.tarjeta_kpi("Días de venta con estos feriados", con, f"{con - base:+d} respecto de sin feriados" if con != base else None, donde=c2)
 
     if editable:
         motivo = st.text_input("Motivo (opcional, queda en el historial: p. ej. el nombre del feriado)", key=f"fer_motivo_{mes}_{version}", max_chars=200)

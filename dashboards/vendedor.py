@@ -21,6 +21,8 @@ import streamlit as st  # noqa: E402
 from streamlit.errors import StreamlitAPIException  # noqa: E402
 
 from barras import capa_proyeccion, leyenda_avance, tablas_resumen_mis_ventas, x_texto  # noqa: E402
+import auth_ui  # noqa: E402
+import estilo_pej as E  # noqa: E402
 from estilo import AZUL, GRIS_MARCA, TXT, esc, mostrar_logo, texto_grande  # noqa: E402
 from sigma_conn import config_bimestre as CB  # noqa: E402
 from sigma_conn import config_campanas as CS  # noqa: E402
@@ -92,6 +94,7 @@ tablas["cfg_11_titulares_articulo"], LINEAS_T, OBJ_CANAL_T, OBJ_SUBCANAL_T = CS.
 ventas_mes = ventas[(pd.to_datetime(ventas["fecha"]) >= pd.Timestamp(inicio_m)) & (pd.to_datetime(ventas["fecha"]) <= pd.Timestamp(fin_m))]
 ultimo = TB.ultimo_dia_con_ventas(ventas_mes)
 corte = sb.date_input("Corte (día inclusive)", value=min(ultimo or inicio_m, fin_m), min_value=inicio_m, max_value=fin_m)
+auth_ui.bloque_usuario(_sesion)      # al pie de la barra lateral, después de los filtros
 
 # ----------------------------------------------------------------------------- facturación (solo este vendedor)
 CFG = CO.config_del_mes(mes)
@@ -106,18 +109,20 @@ del tabla_total                            # a partir de acá solo existe la fil
 
 mostrar_logo(180)
 st.title(f"Hola, {_sesion['nombre']}")
-st.caption(f"Mes {mes} · corte {corte:%d/%m/%Y} · datos actualizados {TB.fmt_actualizado(meta)} · "
+st.caption(f"Mes {mes} · corte {corte:%d/%m/%Y} · "
            "neto sin IVA, todos los canales (las notas de crédito restan).")
 if ultimo and corte > ultimo:
     st.warning(f"No hay ventas posteriores al {ultimo:%d/%m/%Y}.")
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Tu venta neta del mes", TB.fmt_millones(f["vendido"]), help="Neto sin IVA, hasta el día de corte.")
-c1.caption(f"{O.dias_transcurridos(corte, FER)} días de venta pasados · {O.dias_restantes(corte, FER)} por venir")
-c2.metric("Premio ganado hoy", TB.fmt_pesos(f["premio"]), help="El premio del escalón más alto que ya alcanzaste.")
-c2.caption(f"Escalón {int(f['escalon'])}" if f["escalon"] else "Todavía sin escalón")
-c3.metric("Premio a fin de mes", TB.fmt_pesos(f["premio_proyectado"]), help="Si seguís vendiendo al ritmo de hoy.")
-c3.caption("Si seguís al ritmo actual")
+E.tarjeta_kpi("Tu venta neta del mes", TB.fmt_millones(f["vendido"]),
+              f"{O.dias_transcurridos(corte, FER)} días de venta pasados · {O.dias_restantes(corte, FER)} por venir",
+              ayuda="Neto sin IVA, hasta el día de corte.", donde=c1)
+E.tarjeta_kpi("Premio ganado hoy", TB.fmt_pesos(f["premio"]),
+              f"Escalón {int(f['escalon'])}" if f["escalon"] else "Todavía sin escalón",
+              ayuda="El premio del escalón más alto que ya alcanzaste.", donde=c2)
+E.tarjeta_kpi("Premio a fin de mes", TB.fmt_pesos(f["premio_proyectado"]), "Si seguís al ritmo actual",
+              ayuda="Si seguís vendiendo al ritmo de hoy.", donde=c3)
 st.markdown(f"### {f['estado_txt']}")
 
 if f["siguiente_escalon"] == f["siguiente_escalon"] and f["siguiente_escalon"] is not None:

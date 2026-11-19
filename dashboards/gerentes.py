@@ -21,6 +21,8 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 from streamlit.errors import StreamlitAPIException  # noqa: E402
 
+import auth_ui  # noqa: E402
+import estilo_pej as E  # noqa: E402
 from barras import capa_proyeccion, leyenda_avance, tablas_resumen_mis_ventas, x_texto  # noqa: E402
 from estilo import esc, mostrar_logo  # noqa: E402
 from sigma_conn import config_bimestre as CB  # noqa: E402
@@ -181,6 +183,7 @@ sup_extra_sel = [s for s in sup_todos if s in extra_sup]
 perfiles = [N.PERFIL_GENERAL, N.PERFIL_AASS, N.PERFIL_INTERIOR]
 perfil_sel = sb.multiselect("Perfil de escala", perfiles, default=perfiles)
 solo_con_venta = sb.checkbox("Ocultar vendedores sin ventas", value=False)
+auth_ui.bloque_usuario(_sesion)      # al pie de la barra lateral, después de los filtros
 
 tabla = tabla_total[tabla_total["supervisor"].isin(sup_sel) & tabla_total["perfil"].isin(perfil_sel)]
 if solo_con_venta:
@@ -189,9 +192,8 @@ if solo_con_venta:
 # ----------------------------------------------------------------------------- encabezado
 mostrar_logo(180)
 st.title("Facturación por vendedor")
-datos_al = TB.fmt_actualizado(meta)
 st.caption(
-    f"Mes {mes} · corte {corte:%d/%m/%Y} · datos actualizados {datos_al} · neto sin IVA, todos los canales "
+    f"Mes {mes} · corte {corte:%d/%m/%Y} · neto sin IVA, todos los canales "
     "(Axum, Compre Ahora y Directa; las notas de crédito restan). No cuenta anuladas, Depósito Morillo ni "
     "heladeras y muebles de Unilever.")
 if ultimo and corte > ultimo:
@@ -224,20 +226,23 @@ n_esc = int((tabla["escalon"] > 0).sum())
 
 # Fila 1: plata
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Venta neta del mes", TB.fmt_millones(tabla["vendido"].sum()), help="Neto sin IVA, todos los canales, hasta el día de corte.")
-c1.caption(f"{resumen['dias_transcurridos']} días de venta pasados · {resumen['dias_restantes']} por venir")
-c2.metric("Vendedores con escalón", f"{n_esc} de {len(tabla)}", help="Cuántos ya alcanzaron al menos el escalón 1 de su escala.")
-c2.caption("Alcanzaron al menos el escalón 1")
-c3.metric("Premios ganados hoy", TB.fmt_pesos(tabla["premio"].sum()), help="Suma de los premios de los escalones ya alcanzados.")
-c3.caption("Con lo vendido hasta el corte")
-c4.metric("Premios a fin de mes", TB.fmt_pesos(tabla["premio_proyectado"].sum()), help="Si cada vendedor sigue vendiendo al ritmo de hoy.")
-c4.caption("Si siguen al ritmo actual")
+E.tarjeta_kpi("Venta neta del mes", TB.fmt_millones(tabla["vendido"].sum()),
+              f"{resumen['dias_transcurridos']} días de venta pasados · {resumen['dias_restantes']} por venir",
+              ayuda="Neto sin IVA, todos los canales, hasta el día de corte.", donde=c1)
+E.tarjeta_kpi("Vendedores con escalón", f"{n_esc} de {len(tabla)}", "Alcanzaron al menos el escalón 1",
+              ayuda="Cuántos ya alcanzaron al menos el escalón 1 de su escala.", donde=c2)
+E.tarjeta_kpi("Premios ganados hoy", TB.fmt_pesos(tabla["premio"].sum()), "Con lo vendido hasta el corte",
+              ayuda="Suma de los premios de los escalones ya alcanzados.", donde=c3)
+E.tarjeta_kpi("Premios a fin de mes", TB.fmt_pesos(tabla["premio_proyectado"].sum()), "Si siguen al ritmo actual",
+              ayuda="Si cada vendedor sigue vendiendo al ritmo de hoy.", donde=c4)
 
 # Fila 2: semáforo (ícono + texto, nunca solo color)
 s1, s2, s3 = st.columns(3)
-s1.metric(TB.ESTADO_TXT["verde"], int(ne.get("verde", 0)), help="Ya alcanzaron al menos el escalón 1.")
-s2.metric(TB.ESTADO_TXT["amarillo"], int(ne.get("amarillo", 0)), help="Todavía no lo alcanzaron, pero al ritmo actual llegan al escalón 1.")
-s3.metric(TB.ESTADO_TXT["rojo"], int(ne.get("rojo", 0)), help="Al ritmo actual no llegan al escalón 1.")
+E.tarjeta_kpi(TB.ESTADO_TXT["verde"], int(ne.get("verde", 0)), tono="verde", ayuda="Ya alcanzaron al menos el escalón 1.", donde=s1)
+E.tarjeta_kpi(TB.ESTADO_TXT["amarillo"], int(ne.get("amarillo", 0)), tono="naranja",
+              ayuda="Todavía no lo alcanzaron, pero al ritmo actual llegan al escalón 1.", donde=s2)
+E.tarjeta_kpi(TB.ESTADO_TXT["rojo"], int(ne.get("rojo", 0)), tono="rojo", ayuda="Al ritmo actual no llegan al escalón 1.", donde=s3)
+E.leyenda_tonos()
 
 tab_fact, tab_ritmo, tab_cob, tab_mv, tab_cf, tab_11t, tab_canal, tab_escalas, tab_obj, tab_usr = st.tabs(
     ["Facturación", "Ritmo", "Cobertura", "Mis Ventas", "Club Faro", "11 Titulares", "Por canal", "Escalas y premios", "Objetivos", "Usuarios"])
@@ -367,9 +372,10 @@ with tab_cob:
         k = st.columns(len(N.CATEGORIAS_COBERTURA))
         for col, cat in zip(k, N.CATEGORIAS_COBERTURA):
             d = rc["por_categoria"][cat]
-            col.metric(f"{cat} · toda la distribuidora", f"{d['clientes']:,} de {d['objetivo']:,.0f}".replace(",", "."),
-                       help="Clientes distintos con compra de la categoría en el bimestre, contra el objetivo total.")
-            col.caption(f"{TB.ESTADO_AVANCE_TXT[d['estado']]} · esperado a hoy: {d['esperado_clientes']:,.0f}".replace(",", "."))
+            E.tarjeta_kpi(f"{cat} · toda la distribuidora", f"{d['clientes']:,} de {d['objetivo']:,.0f}".replace(",", "."),
+                          f"{TB.ESTADO_AVANCE_TXT[d['estado']]} · esperado a hoy: {d['esperado_clientes']:,.0f}".replace(",", "."),
+                          tono=E.tono_estado(d["estado"]), donde=col,
+                          ayuda="Clientes distintos con compra de la categoría en el bimestre, contra el objetivo total.")
 
         if tc.empty:
             st.info("No hay vendedores con esos filtros.")
@@ -443,9 +449,12 @@ with tab_mv:
             st.info("No hay vendedores con esos filtros.")
         else:
             k = st.columns(3)
-            k[0].metric("Objetivos cumplidos", f"{int((mv['estado'] == 'verde').sum())} de {len(mv)}", help="Objetivos de campaña que ya llegaron al target.")
-            k[1].metric("En camino", int((mv["estado"] == "amarillo").sum()), help="Todavía no llegaron, pero al ritmo actual cumplen al cierre del bimestre.")
-            k[2].metric("Proyección insuficiente", int((mv["estado"] == "rojo").sum()), help="Al ritmo actual no llegan al target.")
+            E.tarjeta_kpi("Objetivos cumplidos", f"{int((mv['estado'] == 'verde').sum())} de {len(mv)}", tono="verde",
+                          ayuda="Objetivos de campaña que ya llegaron al target.", donde=k[0])
+            E.tarjeta_kpi("En camino", int((mv["estado"] == "amarillo").sum()), tono="naranja",
+                          ayuda="Todavía no llegaron, pero al ritmo actual cumplen al cierre del bimestre.", donde=k[1])
+            E.tarjeta_kpi("Proyección insuficiente", int((mv["estado"] == "rojo").sum()), tono="rojo",
+                          ayuda="Al ritmo actual no llegan al target.", donde=k[2])
 
             leyenda_avance()
             g = TB.agregar_proyeccion(mv).assign(
@@ -533,10 +542,11 @@ with tab_cf:
             k = st.columns(len(lineas_cf))
             for col, (linea, info) in zip(k, lineas_cf.items()):
                 d = rcf["por_linea"][linea]
-                col.metric(info["nombre"], f"{d['logrado']:,.0f} de {d['objetivo']:,.0f}".replace(",", "."),
-                           help="Suma de todos los vendedores con objetivo en la línea.")
-                col.caption(f"{TB.ESTADO_AVANCE_TXT[d['estado']]} · faltan {d['faltan']:,.0f} · esperado a hoy: "
-                            f"{d['esperado_valor']:,.0f}".replace(",", "."))
+                E.tarjeta_kpi(info["nombre"], f"{d['logrado']:,.0f} de {d['objetivo']:,.0f}".replace(",", "."),
+                              f"{TB.ESTADO_AVANCE_TXT[d['estado']]} · faltan {d['faltan']:,.0f} · esperado a hoy: "
+                              f"{d['esperado_valor']:,.0f}".replace(",", "."),
+                              tono=E.tono_estado(d["estado"]), donde=col,
+                              ayuda="Suma de todos los vendedores con objetivo en la línea.")
             leyenda_avance()
             g = TB.agregar_proyeccion(cf).assign(
                 etiqueta=cf["estado_txt"].str[0] + " " + cf["logrado"].astype(str) + " / " + cf["objetivo"].map(lambda o: f"{o:.0f}" if o else "s/obj."),
@@ -638,8 +648,9 @@ with tab_11t:
         ct = rt["canales"]
         kt = st.columns(len(ct))
         for colm, r in zip(kt, ct.itertuples()):
-            colm.metric(r.nombre, f"{r.logrado} de {r.objetivo:.0f}", help="Clientes distintos que califican en al menos una línea.")
-            colm.caption(f"{r.estado_txt} · faltan {r.faltan:.0f} · esperado a hoy: {r.esperado_valor:.0f}")
+            E.tarjeta_kpi(r.nombre, f"{r.logrado} de {r.objetivo:.0f}",
+                          f"{r.estado_txt} · faltan {r.faltan:.0f} · esperado a hoy: {r.esperado_valor:.0f}",
+                          tono=E.tono_estado(r.estado), donde=colm, ayuda="Clientes distintos que califican en al menos una línea.")
         st.markdown("**Por línea**")
         leyenda_avance(sin_objetivo=True)
         graf_t(rt["lineas"])
@@ -668,7 +679,7 @@ with tab_canal:
     pc = resumen["por_canal_empresa"]
     tot = sum(pc.values()) or 1.0
     for col, canal in zip((k1, k2, k3), ("Axum", "Compre Ahora", "Directa")):
-        col.metric(f"{canal} (toda la empresa)", TB.fmt_millones(pc[canal]), f"{pc[canal] / tot * 100:.0f}% del total", delta_color="off")
+        E.tarjeta_kpi(f"{canal} (toda la empresa)", TB.fmt_millones(pc[canal]), f"{pc[canal] / tot * 100:.0f}% del total", donde=col)
     st.caption("Directa = cargas hechas directamente en SIGMA y todas las notas de crédito. Los objetivos se miden sobre el total.")
     canales = pd.DataFrame({
         "Vendedor": tabla["vendedor"], "Axum (millones de pesos)": tabla["Axum"] / 1e6, "Compre Ahora (millones de pesos)": tabla["Compre Ahora"] / 1e6,
