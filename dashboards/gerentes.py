@@ -250,7 +250,7 @@ tab_fact, tab_ritmo, tab_cob, tab_mv, tab_cf, tab_11t, tab_canal, tab_escalas, t
 # ----------------------------------------------------------------------------- pestaña facturación
 with tab_fact:
     graf = tabla.assign(
-        etiqueta=tabla["estado_txt"].str[0] + " " + tabla["vendedor"],      # ícono + nombre: el estado nunca va solo en color
+        etiqueta=tabla["estado_txt"].astype(str).str[0] + " " + tabla["vendedor"].astype(str),      # ícono + nombre: el estado nunca va solo en color
         venta_txt=tabla["vendido"].map(TB.fmt_millones),
         escalon_txt=tabla["escalon"].map(lambda e: f"Escalón {e}" if e else "Sin escalón"),
         premio_txt=tabla["premio"].map(TB.fmt_pesos),
@@ -382,7 +382,7 @@ with tab_cob:
         else:
             leyenda_avance()
             g = TB.agregar_proyeccion(tc).assign(
-                etiqueta=tc["estado_txt"].str[0] + " " + tc["clientes"].astype(str) + " / " + tc["objetivo"].map("{:.0f}".format),
+                etiqueta=tc["estado_txt"].astype(str).str[0] + " " + tc["clientes"].astype(str) + " / " + tc["objetivo"].map("{:.0f}".format).astype(str),
                 avance_pct=tc["avance"].clip(upper=1.5), avance_txt=(tc["avance"] * 100).map("{:.0f}%".format),
                 esperado_txt=tc["esperado_clientes"].map("{:.0f}".format), faltan_txt=tc["faltan"].map("{:.0f}".format))
             orden = list(dict.fromkeys(tc.sort_values("vendedor")["vendedor"]))
@@ -458,8 +458,8 @@ with tab_mv:
 
             leyenda_avance()
             g = TB.agregar_proyeccion(mv).assign(
-                etiqueta=mv["estado_txt"].str[0] + " " + mv["logrado"].map("{:,.0f}".format).str.replace(",", ".") + " / "
-                + mv["target"].map("{:,.0f}".format).str.replace(",", "."),
+                etiqueta=mv["estado_txt"].astype(str).str[0] + " " + mv["logrado"].map("{:,.0f}".format).astype(str).str.replace(",", ".") + " / "
+                + mv["target"].map("{:,.0f}".format).astype(str).str.replace(",", "."),
                 avance_pct=mv["avance"].clip(upper=1.5), avance_txt=(mv["avance"] * 100).map("{:.0f}%".format),
                 esperado_txt=mv["esperado_valor"].map("{:,.0f}".format).str.replace(",", "."),
                 faltan_txt=mv["faltan"].map("{:,.0f}".format).str.replace(",", "."))
@@ -549,7 +549,7 @@ with tab_cf:
                               ayuda="Suma de todos los vendedores con objetivo en la línea.")
             leyenda_avance()
             g = TB.agregar_proyeccion(cf).assign(
-                etiqueta=cf["estado_txt"].str[0] + " " + cf["logrado"].astype(str) + " / " + cf["objetivo"].map(lambda o: f"{o:.0f}" if o else "s/obj."),
+                etiqueta=cf["estado_txt"].astype(str).str[0] + " " + cf["logrado"].astype(str) + " / " + cf["objetivo"].map(lambda o: f"{o:.0f}" if o else "s/obj.").astype(str),
                 avance_pct=cf["avance"].clip(upper=1.5), avance_txt=(cf["avance"] * 100).map("{:.0f}%".format),
                 esperado_txt=cf["esperado_valor"].map("{:.0f}".format), faltan_txt=cf["faltan"].map("{:.0f}".format))
             orden_v = list(dict.fromkeys(cf.sort_values("vendedor")["vendedor"]))
@@ -624,8 +624,8 @@ with tab_11t:
                        "los resultados son provisorios hasta que se marquen S o N.")
 
         def graf_t(df, leyenda=True):
-            d = TB.agregar_proyeccion(df.assign(esperado_pct=rt["esperado_pct"])).assign(avance_pct=df["avance"].clip(upper=1.5), etiqueta=df["estado_txt"].str[0] + " " + df["logrado"].astype(str)
-                          + " / " + df["objetivo"].map("{:.0f}".format),
+            d = TB.agregar_proyeccion(df.assign(esperado_pct=rt["esperado_pct"])).assign(avance_pct=df["avance"].clip(upper=1.5), etiqueta=df["estado_txt"].astype(str).str[0] + " " + df["logrado"].astype(str)
+                          + " / " + df["objetivo"].map("{:.0f}".format).astype(str),
                           avance_txt=(df["avance"] * 100).map("{:.0f}%".format), faltan_txt=df["faltan"].map("{:.0f}".format),
                           esperado_txt=df["esperado_valor"].map("{:.0f}".format),
                           esperado_pct=rt["esperado_pct"])

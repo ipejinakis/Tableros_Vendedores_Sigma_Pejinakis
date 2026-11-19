@@ -198,8 +198,8 @@ with tab_ritmo:
 
 def _barras_avance(df: pd.DataFrame, y_col: str, orden_y: list[str]) -> alt.LayerChart:
     g = TB.agregar_proyeccion(df).assign(
-        etiqueta=df["estado_txt"].str[0] + " " + df["logrado"].map("{:,.0f}".format).str.replace(",", ".") + " / "
-        + df["objetivo"].map("{:,.0f}".format).str.replace(",", "."),
+        etiqueta=df["estado_txt"].astype(str).str[0] + " " + df["logrado"].map("{:,.0f}".format).astype(str).str.replace(",", ".") + " / "
+        + df["objetivo"].map("{:,.0f}".format).astype(str).str.replace(",", "."),
         avance_pct=df["avance"].clip(upper=1.5), avance_txt=(df["avance"] * 100).map("{:.0f}%".format),
         esperado_txt=df["esperado_valor"].map("{:,.0f}".format).str.replace(",", "."),
         faltan_txt=df["faltan"].map("{:,.0f}".format).str.replace(",", "."))
@@ -317,7 +317,7 @@ if _tiene_11t:
                    "o 3 unidades iguales (tradicionales).")
         lin = rt["lineas"]
         d = TB.agregar_proyeccion(lin.assign(esperado_pct=rt["esperado_pct"])).assign(avance_pct=lin["avance"].clip(upper=1.5),
-                       etiqueta=lin["estado_txt"].str[0] + " " + lin["logrado"].astype(str) + " / " + lin["objetivo"].map("{:.0f}".format),
+                       etiqueta=lin["estado_txt"].astype(str).str[0] + " " + lin["logrado"].astype(str) + " / " + lin["objetivo"].map("{:.0f}".format).astype(str),
                        avance_txt=(lin["avance"] * 100).map("{:.0f}%".format), faltan_txt=lin["faltan"].map("{:.0f}".format),
                        esperado_txt=lin["esperado_valor"].map("{:.0f}".format), esperado_pct=rt["esperado_pct"])
         orden = list(d["nombre"])

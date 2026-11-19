@@ -151,3 +151,25 @@ def test_app_dibuja_el_bloque_del_usuario_aunque_la_pagina_se_corte():
     """Si la página hace st.stop() antes de sus filtros (sin datos), app.py lo dibuja igual: siempre se puede cerrar la sesión."""
     app = (ROOT / "dashboards" / "app.py").read_text(encoding="utf-8")
     assert "finally:" in app and "_pj_bloque_ok" in app and "auth_ui.bloque_usuario(usuario)" in app
+
+
+def test_etiquetas_con_tabla_vacia_no_rompen():
+    """Regresión: con 0 filas, Series.map() devuelve float64 y `str + float64` tira TypeError (pandas 3 / arrow).
+    Pasó en producción con el bimestre nuevo sin objetivos de Club Faro. Las etiquetas se arman con astype(str)."""
+    import pandas as pd
+    cf = pd.DataFrame({"estado_txt": pd.Series([], dtype=object), "logrado": pd.Series([], dtype=float),
+                       "objetivo": pd.Series([], dtype=float)})
+    et = (cf["estado_txt"].astype(str).str[0] + " " + cf["logrado"].astype(str) + " / "
+          + cf["objetivo"].map(lambda o: f"{o:.0f}" if o else "s/obj.").astype(str))
+    assert len(et) == 0
+
+
+def test_dashboards_castean_a_str_el_resultado_de_map_en_etiquetas():
+    import re
+    for f in ("gerentes.py", "vendedor.py"):
+        src = (Path(__file__).resolve().parent.parent / "dashboards" / f).read_text(encoding="utf-8")
+        for m in re.finditer(r'etiqueta=[^\n]*(?:\n\s*\+[^\n]*)?', src):
+            t = m.group(0)
+            assert '"estado_txt"].str[0]' not in t, t
+            for mm in re.finditer(r'\.map\([^)]*\)\)?', t):
+                assert ".astype(str)" in t[mm.end():mm.end() + 15] or ".str." in t[mm.end():mm.end() + 6], t
